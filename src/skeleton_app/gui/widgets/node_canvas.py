@@ -331,9 +331,15 @@ class NodeCanvas(QGraphicsView):
     
     def clear_all(self):
         """Clear all nodes and connections."""
-        self.scene.clear()
-        self.nodes.clear()
+        # Remove nodes and connections but keep other items
+        for conn in self.connections[:]:
+            self.scene.removeItem(conn)
         self.connections.clear()
+        
+        for node in self.nodes.values():
+            self.scene.removeItem(node)
+        self.nodes.clear()
+        
         self._next_node_x = 50
         self._next_node_y = 50
     
@@ -405,9 +411,16 @@ class MiniMapView(QGraphicsView):
     
     def update_viewport_rect(self):
         """Update the viewport rectangle to match main view."""
-        # Get visible rect in scene coordinates
-        visible_rect = self.main_view.mapToScene(self.main_view.viewport().rect()).boundingRect()
-        self.viewport_rect.setRect(visible_rect)
+        try:
+            # Get visible rect in scene coordinates from main view
+            visible_rect = self.main_view.mapToScene(self.main_view.viewport().rect()).boundingRect()
+            self.viewport_rect.setRect(visible_rect)
+            
+            # Ensure minimap shows the entire scene
+            self.fitInView(self.scene().sceneRect(), Qt.KeepAspectRatio)
+        except RuntimeError:
+            # Object may have been deleted
+            pass
     
     def mousePressEvent(self, event):
         """Start dragging viewport."""
@@ -630,8 +643,15 @@ class NodeCanvasWidget(QWidget):
         except Exception as e:
             logger.error(f"Failed to get JACK connections: {e}")
         
-        # Update minimap
-        self.minimap.fitInView(self.canvas.scene.sceneRect(), Qt.KeepAspectRatio)
+        # Update minimap - refit to show all nodes and update viewport
+        if self.canvas.nodes:
+            # Fit to actual content bounds
+            content_rect = self.canvas.scene.itemsBoundingRect()
+            self.minimap.setSceneRect(content_rect)
+            self.minimap.fitInView(content_rect, Qt.KeepAspectRatio)
+        else:
+            # No nodes yet - use default scene rect
+            self.minimap.fitInView(self.canvas.scene.sceneRect(), Qt.KeepAspectRatio)
         self.minimap.update_viewport_rect()
     
     def _auto_refresh(self):
