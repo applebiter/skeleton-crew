@@ -173,8 +173,9 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.patchbay, "Patchbay List")
         
         # Prevent closing of system tabs (Node Canvas, Patchbay)
-        self.tabs.tabBar().setTabButton(0, self.tabs.tabBar().RightSide, None)
-        self.tabs.tabBar().setTabButton(1, self.tabs.tabBar().RightSide, None)
+        from PySide6.QtWidgets import QTabBar
+        self.tabs.tabBar().setTabButton(0, QTabBar.ButtonPosition.RightSide, None)
+        self.tabs.tabBar().setTabButton(1, QTabBar.ButtonPosition.RightSide, None)
         
         # TODO: Add more tabs (Media Library, Playlist, etc.)
         
