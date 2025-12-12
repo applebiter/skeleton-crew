@@ -1,0 +1,186 @@
+node:
+  id: "linux-01"
+  name: "Main Linux Node"
+  host: "0.0.0.0"
+  port: 8000
+  
+  # Define what this node can do
+  # Philosophy: Every node is capable, work with what's available
+  roles:
+    - "stt_realtime"      # Vosk for quick commands
+    - "stt_batch"         # Can handle Whisper base/small
+    - "tts"               # Piper TTS
+    - "llm"               # Whatever models fit (3B-8B)
+    - "audio_hub"         # JACK audio routing
+    - "agent"             # Can run agent tasks
+  
+  # Hardware tags for opportunistic scheduling
+  tags:
+    platform: "linux"
+    gpu: "nvidia-1050ti"
+    gpu_memory: "4GB"
+    ram: "32GB"
+    available: true       # Dynamic: is this node free?
+
+# STT Configuration
+stt:
+  # Default provider for different contexts
+  providers:
+    realtime:
+      backend: "vosk"
+      model: "vosk-model-en-us-0.22"
+      model_path: "./models/vosk"
+    
+    transcription:
+      backend: "whisper"
+      model: "base"
+      device: "cuda"  # or "cpu"
+      compute_type: "float16"
+  
+  # Vosk-specific settings
+  vosk:
+    sample_rate: 16000
+    
+  # Whisper-specific settings  
+  whisper:
+    language: "en"
+    task: "transcribe"  # or "translate"
+
+# TTS Configuration
+tts:
+  backend: "piper"
+  piper:
+    model: "en_US-lessac-medium"
+    model_path: "./models/piper"
+    sample_rate: 22050
+    
+# LLM Configuration
+llm:
+  # Philosophy: Use local models, break complex tasks into simple ones
+  # Prefer many small calls over few large ones
+  providers:
+    - name: "ollama"
+      type: "ollama"
+      base_url: "http://localhost:11434"
+      models:
+        chat: "granite4:3b"           # Fast, supports tools
+        planning: "granite4:3b"       # Plan next small step with tool calls
+        vision: "ministral-3:3b"      # Vision tasks (OCR, image analysis)
+        embedding: "nomic-embed-text"
+      enabled: true
+    
+    - name: "openai"
+      type: "openai"
+      models:
+        chat: "gpt-4o-mini"        # Fallback only
+        embedding: "text-embedding-3-small"
+      enabled: false               # Don't rely on cloud
+      requires_key: true
+    
+    - name: "anthropic"
+      type: "anthropic"
+      models:
+        chat: "claude-3-5-sonnet-20241022"
+      enabled: false               # Don't rely on cloud
+      requires_key: true
+  
+  # Default selections - always local
+  defaults:
+    chat: "ollama:granite4:3b"
+    planning: "ollama:granite4:3b"
+    vision: "ollama:ministral-3:3b"
+    embedding: "ollama:nomic-embed-text"
+  
+  # Tool calling support
+  tools:
+    enabled: true                 # Enable tool/function calling
+    max_iterations: 20            # Max tool call loops
+  
+  # Context management - keep it small for iteration
+  max_context_length: 2048        # Smaller = faster
+  max_history_messages: 10        # Remember less, act more
+  max_iterations: 20              # Many small steps
+
+# Audio Configuration (JACK)
+audio:
+  jack:
+    client_name: "skeleton_app"
+    auto_connect: true
+    ports:
+      input: "voice_in"
+      output: "voice_out"
+  
+  # VAD settings
+  vad:
+    threshold: 0.5
+    min_silence_duration: 0.5  # seconds
+    min_speech_duration: 0.3
+
+# Wake-word Configuration
+wakeword:
+  enabled: true
+  phrase: "computer"
+  sensitivity: 0.5
+  timeout: 5.0  # seconds to listen after wake
+
+# Commands
+commands:
+  # Built-in commands
+  builtin:
+    - name: "time"
+      aliases: ["what time is it", "current time"]
+      handler: "builtin.time"
+    
+    - name: "weather"
+      aliases: ["what's the weather", "weather forecast"]
+      handler: "builtin.weather"
+
+# Database - Centralized on karate (192.168.32.11)
+# All nodes connect to the same PostgreSQL instance for:
+# - Node registry and discovery
+# - RAG corpus and embeddings (pgvector)
+# - Session history and context
+# - Media transcription metadata
+database:
+  url: "${DATABASE_URL}"  # e.g., postgresql://skeleton:password@192.168.32.11:5432/skeleton_app
+  pool_size: 5
+  max_overflow: 10
+  
+  # Optional: Enable connection pooling across nodes
+  pool_pre_ping: true  # Test connections before using
+  pool_recycle: 3600   # Recycle connections after 1 hour
+
+# Network/API
+network:
+  # Registry of other nodes
+  # With centralized database, nodes auto-register themselves
+  # and discover others via the shared registry table
+  registry:
+    backend: "postgres"  # Dynamic registration from database
+    
+    # Static node definitions (optional, for bootstrapping)
+    # Normally nodes discover each other via database
+    nodes: []
+  
+  # Capability routing policies
+  # Philosophy: Work with what's available, don't depend on specific nodes
+  routing:
+    prefer_local: true
+    fallback_to_remote: true
+    load_balance: true           # Distribute across available nodes
+    
+    # Task decomposition settings
+    decomposition:
+      max_task_size: "small"     # Break large tasks into small chunks
+      prefer_parallel: true      # Run chunks on different nodes
+      min_chunk_duration: 30     # Seconds - minimum work unit size
+    
+    # No hard overrides - be opportunistic
+    # If a node is busy or unavailable, use another
+    overrides: {}
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/skeleton.log"

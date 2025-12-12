@@ -1,0 +1,172 @@
+node:
+  id: "linux-01"
+  name: "Main Linux Node"
+  host: "0.0.0.0"
+  port: 8000
+  
+  # Define what this node can do
+  roles:
+    - "stt_realtime"
+    - "tts"
+    - "llm_light"
+    - "audio_hub"
+  
+  # Hardware tags for routing decisions
+  tags:
+    platform: "linux"
+    gpu: "nvidia-1050ti"
+    gpu_memory: "4GB"
+    ram: "32GB"
+
+# STT Configuration
+stt:
+  # Default provider for different contexts
+  providers:
+    realtime:
+      backend: "vosk"
+      model: "vosk-model-en-us-0.22"
+      model_path: "./models/vosk"
+    
+    transcription:
+      backend: "whisper"
+      model: "base"
+      device: "cuda"  # or "cpu"
+      compute_type: "float16"
+  
+  # Vosk-specific settings
+  vosk:
+    sample_rate: 16000
+    
+  # Whisper-specific settings  
+  whisper:
+    language: "en"
+    task: "transcribe"  # or "translate"
+
+# TTS Configuration
+tts:
+  backend: "piper"
+  piper:
+    model: "en_US-lessac-medium"
+    model_path: "./models/piper"
+    sample_rate: 22050
+    
+# LLM Configuration
+llm:
+  # Philosophy: Use local models, break complex tasks into simple ones
+  # Prefer many small calls over few large ones
+  providers:
+    - name: "ollama"
+      type: "ollama"
+      base_url: "http://localhost:11434"
+      models:
+        chat: "granite4:3b"           # Fast, supports tools
+        planning: "granite4:3b"       # Plan next small step with tool calls
+        vision: "ministral-3:3b"      # Vision tasks (OCR, image analysis)
+        embedding: "nomic-embed-text"
+      enabled: true
+    
+    - name: "openai"
+      type: "openai"
+      models:
+        chat: "gpt-4o-mini"
+        embedding: "text-embedding-3-small"
+      enabled: true
+      requires_key: true
+    
+    - name: "anthropic"
+      type: "anthropic"
+      models:
+        chat: "claude-3-5-sonnet-20241022"
+      enabled: true
+      requires_key: true
+  
+  # Default selections - always local
+  defaults:
+    chat: "ollama:granite4:3b"
+    planning: "ollama:granite4:3b"
+    vision: "ollama:ministral-3:3b"
+    embedding: "ollama:nomic-embed-text"
+  
+  # Tool calling support
+  tools:
+    enabled: true                 # Enable tool/function calling
+    max_iterations: 20            # Max tool call loops
+  
+  # Context management - keep it small for iteration
+  max_context_length: 2048        # Smaller = faster
+  max_history_messages: 10        # Remember less, act more
+  max_iterations: 20              # Many small steps
+
+# Audio Configuration (JACK)
+audio:
+  jack:
+    client_name: "skeleton_app"
+    auto_connect: true
+    ports:
+      input: "voice_in"
+      output: "voice_out"
+  
+  # VAD settings
+  vad:
+    threshold: 0.5
+    min_silence_duration: 0.5  # seconds
+    min_speech_duration: 0.3
+
+# Wake-word Configuration
+wakeword:
+  enabled: true
+  phrase: "computer"
+  sensitivity: 0.5
+  timeout: 5.0  # seconds to listen after wake
+
+# Commands
+commands:
+  # Built-in commands
+  builtin:
+    - name: "time"
+      aliases: ["what time is it", "current time"]
+      handler: "builtin.time"
+    
+    - name: "weather"
+      aliases: ["what's the weather", "weather forecast"]
+      handler: "builtin.weather"
+
+# Database
+database:
+  url: "${DATABASE_URL}"
+  pool_size: 5
+  max_overflow: 10
+
+# Network/API
+network:
+  # Registry of other nodes
+  registry:
+    backend: "postgres"  # or "static" for file-based
+    
+    # Static node definitions (if not using postgres)
+    nodes:
+      - id: "windows-main"
+        host: "192.168.1.100"
+        port: 8000
+        roles: ["llm_heavy", "stt_batch", "rag_engine"]
+        tags:
+          platform: "windows"
+          gpu: "nvidia-3060"
+  
+  # Capability routing policies
+  routing:
+    prefer_local: true
+    fallback_to_remote: true
+    
+    # Override preferences by capability
+    overrides:
+      llm_heavy:
+        prefer_node: "windows-main"
+      stt_transcription:
+        prefer_node: "windows-main"
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/skeleton.log"
