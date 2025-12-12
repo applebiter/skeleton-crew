@@ -328,8 +328,12 @@ class VideoTranscoder:
             universal_newlines=True
         )
         
+        # Collect all stderr for error reporting
+        stderr_lines = []
+        
         # Parse progress from stderr
         for line in process.stderr:
+            stderr_lines.append(line)
             if progress_callback and 'time=' in line:
                 # Extract time from ffmpeg output
                 # Example: "frame= 1234 fps=56 q=8.0 size=  123456kB time=00:01:23.45 bitrate=1234.5kbits/s"
@@ -344,7 +348,10 @@ class VideoTranscoder:
         
         returncode = process.wait()
         if returncode != 0:
-            raise RuntimeError(f"ffmpeg failed with code {returncode}")
+            # Show last 20 lines of stderr for debugging
+            error_output = '\n'.join(stderr_lines[-20:])
+            logger.error(f"ffmpeg stderr:\n{error_output}")
+            raise RuntimeError(f"ffmpeg failed with code {returncode}\n{error_output}")
     
     def _transcode_audio_stream(
         self,
