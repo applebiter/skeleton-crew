@@ -327,7 +327,7 @@ class QtVideoPlayer(QObject):
                 self.play()
         
         # Get JACK frame position
-        jack_frame = self.jack_manager.get_frame()
+        jack_frame = self.jack_manager.get_transport_frame()
         
         # Convert JACK frame to milliseconds (assuming 48kHz sample rate)
         sample_rate = 48000  # TODO: Get actual sample rate from JACK
