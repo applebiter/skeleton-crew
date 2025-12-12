@@ -69,17 +69,11 @@ class VideoPanel(QWidget):
         header_layout.addWidget(header_label)
         header_layout.addStretch()
         
-        # Open video button (Qt player - regular watching)
+        # Open video button
         self.open_button = QPushButton("📺 Open Video")
         self.open_button.clicked.connect(self._on_open_video)
-        self.open_button.setToolTip("Open video in Qt player for regular watching")
+        self.open_button.setToolTip("Open video in Qt player")
         header_layout.addWidget(self.open_button)
-        
-        # Open in xjadeo button (frame-accurate work)
-        self.open_xjadeo_button = QPushButton("🎬 Open in xjadeo")
-        self.open_xjadeo_button.clicked.connect(self._on_open_xjadeo)
-        self.open_xjadeo_button.setToolTip("Open transcoded video for frame-accurate work (requires transcode)")
-        header_layout.addWidget(self.open_xjadeo_button)
         
         # Screen capture button
         self.capture_button = QPushButton("📹 Screen Capture")
@@ -122,27 +116,8 @@ class VideoPanel(QWidget):
         info_box.setLayout(info_layout)
         layout.addWidget(info_box)
     
-    def _get_transcoded_path(self, source_path: Path) -> Optional[Path]:
-        """
-        Get transcoded video path for source file.
-        Maps ~/Backups/Videos/... to ~/Videos/.../filename_video.mp4
-        """
-        try:
-            backup_base = Path.home() / "Backups/Videos"
-            videos_base = Path.home() / "Videos"
-            
-            if source_path.is_relative_to(backup_base):
-                relative = source_path.relative_to(backup_base)
-                transcoded = videos_base / relative.parent / f"{relative.stem}_video.mp4"
-                return transcoded if transcoded.exists() else None
-            
-            return None
-        except Exception as e:
-            logger.error(f"Failed to get transcoded path: {e}")
-            return None
-    
     def _on_open_video(self):
-        """Handle open video button click (Qt player for regular watching)."""
+        """Handle open video button click."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open Video File",
@@ -162,66 +137,8 @@ class VideoPanel(QWidget):
                 f"Failed to open video:\n{str(e)}"
             )
     
-    def _on_open_xjadeo(self):
-        """Handle open in xjadeo button click (frame-accurate work)."""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open Video for xjadeo (frame-accurate)",
-            str(Path.home() / "Backups/Videos"),
-            "Video Files (*.mp4 *.avi *.mov *.mkv *.webm *.ogv *.flv *.wmv);;All Files (*)"
-        )
-        
-        if not file_path:
-            return
-        
-        source_path = Path(file_path)
-        transcoded_path = self._get_transcoded_path(source_path)
-        
-        if not transcoded_path:
-            # Transcoded version doesn't exist
-            reply = QMessageBox.question(
-                self,
-                "Transcode Required",
-                f"This video needs to be transcoded for xjadeo frame-accurate work.\n\n"
-                f"Original: {source_path.name}\n\n"
-                f"Would you like to:\n"
-                f"• Open Transcode panel to convert it?\n"
-                f"• Or open original in Qt player instead (not frame-accurate)?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                # Show transcode panel
-                from skeleton_app.gui.main_window import MainWindow
-                main_window = self.window()
-                if hasattr(main_window, 'transcode_dock'):
-                    main_window.transcode_dock.setVisible(True)
-                    main_window.view_transcode_action.setChecked(True)
-                QMessageBox.information(
-                    self,
-                    "Transcode Panel",
-                    "Please transcode the video using the Transcode panel, then try opening in xjadeo again."
-                )
-            elif reply == QMessageBox.StandardButton.No:
-                # Open original in Qt player
-                self._open_video_file(str(source_path))
-            
-            return
-        
-        # Transcoded version exists - open it
-        logger.info(f"Opening transcoded video for xjadeo: {transcoded_path}")
-        try:
-            self._open_video_file(str(transcoded_path))
-        except Exception as e:
-            logger.error(f"Failed to open transcoded video: {e}", exc_info=True)
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to open transcoded video:\n{str(e)}"
-            )
-    
     def _open_video_file(self, file_path: str):
-        """Common method to open a video file (extracted from _on_open_video)."""
+        """Open a video file in a new tab."""
         try:
             logger.info(f"Opening video file: {file_path}")
             
