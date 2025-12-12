@@ -22,7 +22,7 @@ Instead, it assumes:
 ### 1. Every Node is Capable
 
 All nodes can:
-- Run 3B models (Llama 3.2, Phi-3)
+- Run 3B models (granite4:3b, ministral-3:3b)
 - Process STT with Vosk or Whisper base/small
 - Synthesize speech with Piper
 - Execute agent tasks
@@ -109,8 +109,13 @@ node = min(available, key=lambda n: n.load)
 If the ideal resource isn't available, use what is:
 
 ```python
-# Try in order of preference
-for model in ["llama3.1:8b", "llama3.2:3b", "llama2:3b"]:
+# Try in order of preference (example with vision task)
+for model in ["ministral-3:7b", "ministral-3:3b"]:
+    if model_available(model):
+        return use_model(model)
+
+# For agent/tool tasks
+for model in ["granite4:8b", "granite4:3b"]:
     if model_available(model):
         return use_model(model)
 
