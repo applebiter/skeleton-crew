@@ -415,12 +415,19 @@ class MiniMapView(QGraphicsView):
             # Get visible rect in scene coordinates from main view
             visible_rect = self.main_view.mapToScene(self.main_view.viewport().rect()).boundingRect()
             self.viewport_rect.setRect(visible_rect)
-            
-            # Ensure minimap shows the entire scene
-            self.fitInView(self.scene().sceneRect(), Qt.KeepAspectRatio)
         except RuntimeError:
             # Object may have been deleted
             pass
+    
+    def refit_minimap(self):
+        """Refit minimap to show entire scene. Call this when nodes are added/removed."""
+        if self.main_view.nodes:
+            # Fit to actual content bounds
+            content_rect = self.scene().itemsBoundingRect()
+            self.fitInView(content_rect, Qt.KeepAspectRatio)
+        else:
+            # No nodes yet - use default scene rect
+            self.fitInView(self.scene().sceneRect(), Qt.KeepAspectRatio)
     
     def mousePressEvent(self, event):
         """Start dragging viewport."""
@@ -643,15 +650,8 @@ class NodeCanvasWidget(QWidget):
         except Exception as e:
             logger.error(f"Failed to get JACK connections: {e}")
         
-        # Update minimap - refit to show all nodes and update viewport
-        if self.canvas.nodes:
-            # Fit to actual content bounds
-            content_rect = self.canvas.scene.itemsBoundingRect()
-            self.minimap.setSceneRect(content_rect)
-            self.minimap.fitInView(content_rect, Qt.KeepAspectRatio)
-        else:
-            # No nodes yet - use default scene rect
-            self.minimap.fitInView(self.canvas.scene.sceneRect(), Qt.KeepAspectRatio)
+        # Update minimap - only refit when nodes change
+        self.minimap.refit_minimap()
         self.minimap.update_viewport_rect()
     
     def _auto_refresh(self):
@@ -676,6 +676,7 @@ class NodeCanvasWidget(QWidget):
     def _fit_all(self):
         """Fit all nodes in view."""
         self.canvas.fitInView(self.canvas.scene.itemsBoundingRect(), Qt.KeepAspectRatio)
+        self.minimap.refit_minimap()
         self.minimap.update_viewport_rect()
     
     def _on_connection_requested(self, output_port: str, input_port: str):
