@@ -82,8 +82,10 @@ class VideoPlayerWidget(QWidget):
         self.video_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.video_widget)
         
-        # Control bar
-        control_layout = QHBoxLayout()
+        # Control bar (in a container widget for visibility control)
+        self.control_widget = QWidget()
+        control_layout = QHBoxLayout(self.control_widget)
+        control_layout.setContentsMargins(0, 0, 0, 0)
         
         # Play/Pause button
         self.play_button = QPushButton()
@@ -146,14 +148,12 @@ class VideoPlayerWidget(QWidget):
         self.close_button.setMaximumWidth(60)
         control_layout.addWidget(self.close_button)
         
-        layout.addLayout(control_layout)
+        layout.addWidget(self.control_widget)
         
-        # Store control layout reference
-        self.control_widget = QWidget()
-        self.control_widget.setLayout(control_layout)
-        
-        # Info bar
-        info_layout = QHBoxLayout()
+        # Info bar (in a container widget for visibility control)
+        self.info_widget = QWidget()
+        info_layout = QHBoxLayout(self.info_widget)
+        info_layout.setContentsMargins(0, 0, 0, 0)
         
         # File name
         file_name = self.player.file_path.name if self.player.file_path else "No file"
@@ -166,8 +166,6 @@ class VideoPlayerWidget(QWidget):
         self.sync_label = QLabel("Sync: --")
         info_layout.addWidget(self.sync_label)
         
-        self.info_widget = QWidget()
-        self.info_widget.setLayout(info_layout)
         layout.addWidget(self.info_widget)
     
     def _apply_mode_settings(self):
