@@ -6,16 +6,18 @@ Shows active Qt video players and allows control.
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
-    QPushButton, QLabel, QFileDialog, QMessageBox, QGroupBox, QDialog
+    QPushButton, QLabel, QFileDialog, QMessageBox, QGroupBox, QScrollArea,
+    QSplitter
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtMultimedia import QMediaPlayer
 
 from skeleton_app.audio.qt_video_player import QtVideoPlayerManager, QtVideoPlayer
+from skeleton_app.gui.widgets.video_player_widget import VideoPlayerWidget
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ class VideoPanel(QWidget):
     def __init__(self, video_manager: QtVideoPlayerManager, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.video_manager = video_manager
+        self.player_widgets: Dict[str, VideoPlayerWidget] = {}
         self._setup_ui()
         
         # Auto-refresh timer
@@ -46,7 +49,7 @@ class VideoPanel(QWidget):
         layout = QVBoxLayout()
         self.setLayout(layout)
         
-        # Header
+        # Header with open button
         header_layout = QHBoxLayout()
         header_label = QLabel("<b>Video Players</b>")
         header_layout.addWidget(header_label)
@@ -59,50 +62,33 @@ class VideoPanel(QWidget):
         
         layout.addLayout(header_layout)
         
-        # Instance tree
-        self.instance_tree = QTreeWidget()
-        self.instance_tree.setHeaderLabels(["Instance", "File", "Status", "Sync"])
-        self.instance_tree.setColumnWidth(0, 100)
-        self.instance_tree.setColumnWidth(1, 250)
-        self.instance_tree.setColumnWidth(2, 80)
-        self.instance_tree.setColumnWidth(3, 100)
-        layout.addWidget(self.instance_tree)
+        # Video players scroll area
+        self.players_scroll = QScrollArea()
+        self.players_scroll.setWidgetResizable(True)
+        self.players_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.players_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         
-        # Control buttons
-        button_layout = QHBoxLayout()
+        # Container for player widgets
+        self.players_container = QWidget()
+        self.players_layout = QVBoxLayout(self.players_container)
+        self.players_layout.addStretch()
         
-        self.stop_button = QPushButton("Stop Selected")
-        self.stop_button.clicked.connect(self._on_stop_selected)
-        button_layout.addWidget(self.stop_button)
-        
-        self.stop_all_button = QPushButton("Stop All")
-        self.stop_all_button.clicked.connect(self._on_stop_all)
-        button_layout.addWidget(self.stop_all_button)
-        
-        button_layout.addStretch()
-        
-        self.refresh_button = QPushButton("Refresh")
-        self.refresh_button.clicked.connect(self._refresh_instances)
-        button_layout.addWidget(self.refresh_button)
-        
-        layout.addLayout(button_layout)
+        self.players_scroll.setWidget(self.players_container)
+        layout.addWidget(self.players_scroll)
         
         # Info box
         info_box = QGroupBox("Info")
         info_layout = QVBoxLayout()
         info_label = QLabel(
             "Qt Multimedia video players sync to JACK transport.\n"
-            "Open multiple videos for multi-monitor setups.\n"
-            "All instances follow the same timeline.\n"
+            "Videos are embedded by default, detach for multi-monitor.\n"
+            "Audio muted by default (JACK handles audio routing).\n"
             "Circular buffer ensures smooth, frame-accurate sync."
         )
         info_label.setWordWrap(True)
         info_layout.addWidget(info_label)
         info_box.setLayout(info_layout)
         layout.addWidget(info_box)
-        
-        # Initial refresh
-        self._refresh_instances()
     
     def _on_open_video(self):
         """Handle open video button click."""
@@ -123,30 +109,18 @@ class VideoPanel(QWidget):
                 sync_enabled=True
             )
             
-            # Create video widget window
-            video_window = QDialog(self)
-            video_window.setWindowTitle(f"{Path(file_path).name} - {instance_id}")
-            video_window.setMinimumSize(800, 600)
+            # Create embedded player widget
+            player_widget = VideoPlayerWidget(player, self)
+            player_widget.closed.connect(self._on_player_closed)
             
-            layout = QVBoxLayout()
-            video_widget = player.create_video_widget(video_window)
-            layout.addWidget(video_widget)
-            video_window.setLayout(layout)
+            # Add to layout (before the stretch)
+            self.players_layout.insertWidget(self.players_layout.count() - 1, player_widget)
             
-            # Show window
-            video_window.show()
-            
-            # Store reference to keep window alive
-            if not hasattr(self, '_video_windows'):
-                self._video_windows = {}
-            self._video_windows[instance_id] = video_window
-            
-            # Connect cleanup
-            video_window.finished.connect(lambda: self._on_window_closed(instance_id))
+            # Store reference
+            self.player_widgets[instance_id] = player_widget
             
             logger.info(f"Opened video: {file_path} (instance: {instance_id})")
             self.video_opened.emit(instance_id, file_path)
-            self._refresh_instances()
             
         except Exception as e:
             logger.error(f"Failed to open video: {e}")
@@ -156,98 +130,33 @@ class VideoPanel(QWidget):
                 f"Failed to open video:\n{str(e)}"
             )
     
-    def _on_window_closed(self, instance_id: str):
-        """Handle video window close."""
-        if hasattr(self, '_video_windows'):
-            self._video_windows.pop(instance_id, None)
+    def _on_player_closed(self, instance_id: str):
+        """Handle video player widget close."""
+        widget = self.player_widgets.pop(instance_id, None)
+        if widget:
+            widget.cleanup()
+            widget.deleteLater()
+        
         self.video_manager.remove_player(instance_id)
         self.video_closed.emit(instance_id)
-        self._refresh_instances()
-    
-    def _on_stop_selected(self):
-        """Stop selected video instance."""
-        selected_items = self.instance_tree.selectedItems()
-        if not selected_items:
-            return
-        
-        for item in selected_items:
-            instance_id = item.text(0)
-            try:
-                # Close window if exists
-                if hasattr(self, '_video_windows'):
-                    window = self._video_windows.pop(instance_id, None)
-                    if window:
-                        window.close()
-                
-                self.video_manager.remove_player(instance_id)
-                logger.info(f"Stopped video instance: {instance_id}")
-                self.video_closed.emit(instance_id)
-            except Exception as e:
-                logger.error(f"Failed to stop instance {instance_id}: {e}")
-        
-        self._refresh_instances()
+        logger.info(f"Closed video player: {instance_id}")
     
     def _on_stop_all(self):
         """Stop all video instances."""
         try:
-            # Close all windows
-            if hasattr(self, '_video_windows'):
-                for window in list(self._video_windows.values()):
-                    window.close()
-                self._video_windows.clear()
-            
-            # Cleanup all players
-            for instance_id in list(self.video_manager.get_all_players().keys()):
+            # Close all player widgets
+            for instance_id in list(self.player_widgets.keys()):
+                widget = self.player_widgets.pop(instance_id)
+                widget.cleanup()
+                widget.deleteLater()
                 self.video_manager.remove_player(instance_id)
                 self.video_closed.emit(instance_id)
             
             logger.info("Stopped all video instances")
-            self._refresh_instances()
         except Exception as e:
             logger.error(f"Failed to stop all instances: {e}")
     
     def _refresh_instances(self):
-        """Refresh the instance list."""
-        self.instance_tree.clear()
-        
-        players = self.video_manager.get_all_players()
-        for instance_id, player in players.items():
-            # Get player state
-            playback_state = player.player.playbackState()
-            if playback_state == QMediaPlayer.PlaybackState.PlayingState:
-                state = "Playing"
-            elif playback_state == QMediaPlayer.PlaybackState.PausedState:
-                state = "Paused"
-            else:
-                state = "Stopped"
-            
-            # Get sync state
-            stats = player.get_sync_stats()
-            sync_text = f"{stats.state.value} ({stats.drift_ms:.1f}ms)"
-            
-            # Get file name
-            file_name = player.file_path.name if player.file_path else "No file"
-            
-            item = QTreeWidgetItem([
-                instance_id,
-                file_name,
-                state,
-                sync_text
-            ])
-            
-            # Color code sync state
-            if stats.state.value == "synced":
-                item.setForeground(3, Qt.green)
-            elif stats.state.value == "syncing":
-                item.setForeground(3, Qt.yellow)
-            elif stats.state.value == "drift":
-                item.setForeground(3, Qt.yellow)
-            else:
-                item.setForeground(3, Qt.red)
-            
-            self.instance_tree.addTopLevelItem(item)
-        
-        # Update button states
-        has_instances = len(players) > 0
-        self.stop_button.setEnabled(has_instances)
-        self.stop_all_button.setEnabled(has_instances)
+        """Refresh the instance list (no-op now that we have embedded widgets)."""
+        # Instance widgets are now self-managing
+        pass
