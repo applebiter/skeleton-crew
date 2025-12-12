@@ -109,10 +109,12 @@ class VideoPanel(QWidget):
                 sync_enabled=True
             )
             
-            # Start playback
-            player.play()
+            # Check if file was loaded successfully
+            if player.player.error() != QMediaPlayer.Error.NoError:
+                error_msg = player.player.errorString()
+                raise RuntimeError(f"Failed to load video: {error_msg}")
             
-            # Create embedded player widget
+            # Create embedded player widget first
             player_widget = VideoPlayerWidget(player, self)
             player_widget.closed.connect(self._on_player_closed)
             
@@ -121,6 +123,9 @@ class VideoPanel(QWidget):
             
             # Store reference
             self.player_widgets[instance_id] = player_widget
+            
+            # Start playback after widget is set up
+            player.play()
             
             logger.info(f"Opened video: {file_path} (instance: {instance_id})")
             self.video_opened.emit(instance_id, file_path)

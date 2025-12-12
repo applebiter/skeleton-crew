@@ -180,9 +180,27 @@ class QtVideoPlayer(QObject):
             True if loaded successfully
         """
         try:
+            if not file_path.exists():
+                raise FileNotFoundError(f"Video file not found: {file_path}")
+            
             self.file_path = file_path
             url = QUrl.fromLocalFile(str(file_path.absolute()))
+            
+            logger.info(f"[{self.instance_id}] Loading: {file_path}")
+            logger.debug(f"[{self.instance_id}] URL: {url.toString()}")
+            
             self.player.setSource(url)
+            
+            # Check media status
+            media_status = self.player.mediaStatus()
+            logger.info(f"[{self.instance_id}] Media status: {media_status}")
+            logger.info(f"[{self.instance_id}] Error status: {self.player.error()}")
+            
+            if self.player.error() != QMediaPlayer.Error.NoError:
+                error_string = self.player.errorString()
+                logger.error(f"[{self.instance_id}] Media error: {error_string}")
+                self.error_occurred.emit(error_string)
+                return False
             
             logger.info(f"[{self.instance_id}] Loaded: {file_path.name}")
             return True
