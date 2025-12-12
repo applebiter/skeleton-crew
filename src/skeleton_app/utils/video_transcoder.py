@@ -244,20 +244,34 @@ class VideoTranscoder:
         self.is_running = True
         
         try:
-            # Transcode video with NVENC
-            codec_name = "NVENC (GPU)" if job.use_hw_accel else "x264 (CPU)"
-            logger.info(f"Transcoding video with {codec_name} (quality {video_quality})")
-            if progress_callback:
-                progress_callback(0, f"Transcoding video with {codec_name}...")
+            # Check if video already exists
+            video_exists = job.output_video_path.exists() and job.output_video_path.stat().st_size > 0
+            audio_exists = job.output_audio_path.exists() and job.output_audio_path.stat().st_size > 0
             
-            self._transcode_video_stream(job, media_info, progress_callback)
+            # Transcode video with NVENC (skip if exists)
+            if video_exists:
+                logger.info(f"Video already exists, skipping: {job.output_video_path}")
+                if progress_callback:
+                    progress_callback(45, "Video already transcoded, skipping...")
+            else:
+                codec_name = "NVENC (GPU)" if job.use_hw_accel else "x264 (CPU)"
+                logger.info(f"Transcoding video with {codec_name} (quality {video_quality})")
+                if progress_callback:
+                    progress_callback(0, f"Transcoding video with {codec_name}...")
+                
+                self._transcode_video_stream(job, media_info, progress_callback)
             
-            # Extract/transcode audio
-            logger.info(f"Extracting audio")
-            if progress_callback:
-                progress_callback(50, "Extracting audio...")
-            
-            self._transcode_audio_stream(job, media_info, progress_callback)
+            # Extract/transcode audio (skip if exists)
+            if audio_exists:
+                logger.info(f"Audio already exists, skipping: {job.output_audio_path}")
+                if progress_callback:
+                    progress_callback(100, "Audio already extracted, skipping...")
+            else:
+                logger.info(f"Extracting audio")
+                if progress_callback:
+                    progress_callback(50, "Extracting audio...")
+                
+                self._transcode_audio_stream(job, media_info, progress_callback)
             
             if progress_callback:
                 progress_callback(100, "Complete!")
