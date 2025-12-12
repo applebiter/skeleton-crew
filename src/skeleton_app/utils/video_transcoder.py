@@ -214,14 +214,14 @@ class VideoTranscoder:
         )
         
         self.current_job = job
-        self.is_running = Truewith NVENC
+        self.is_running = True
+        
+        try:
+            # Transcode video with NVENC
             codec_name = "NVENC (GPU)" if job.use_hw_accel else "x264 (CPU)"
             logger.info(f"Transcoding video with {codec_name} (quality {video_quality})")
             if progress_callback:
-                progress_callback(0, f"Transcoding video with {codec_name}
-            logger.info(f"Transcoding video to MJPEG (quality {video_quality})")
-            if progress_callback:
-                progress_callback(0, "Transcoding video to MJPEG...")
+                progress_callback(0, f"Transcoding video with {codec_name}...")
             
             self._transcode_video_stream(job, media_info, progress_callback)
             
