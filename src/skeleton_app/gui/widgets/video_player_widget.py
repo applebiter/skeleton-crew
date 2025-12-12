@@ -87,6 +87,13 @@ class VideoPlayerWidget(QWidget):
         control_layout = QHBoxLayout(self.control_widget)
         control_layout.setContentsMargins(0, 0, 0, 0)
         
+        # JACK Sync checkbox
+        from PySide6.QtWidgets import QCheckBox
+        self.jack_sync_checkbox = QCheckBox("JACK Sync")
+        self.jack_sync_checkbox.setToolTip("Follow JACK transport (play/stop/seek)")
+        self.jack_sync_checkbox.stateChanged.connect(self._on_jack_sync_toggled)
+        control_layout.addWidget(self.jack_sync_checkbox)
+        
         # Play/Pause button
         self.play_button = QPushButton()
         self.play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
@@ -201,6 +208,25 @@ class VideoPlayerWidget(QWidget):
         self.player.duration_changed.connect(self._on_duration_changed)
         self.player.state_changed.connect(self._on_state_changed)
         self.player.sync_stats_changed.connect(self._on_sync_stats_changed)
+    
+    def _on_jack_sync_toggled(self, state):
+        """Handle JACK sync checkbox toggle."""
+        from PySide6.QtCore import Qt
+        enabled = (state == Qt.CheckState.Checked.value)
+        self.player.set_sync_enabled(enabled)
+        
+        if enabled:
+            logger.info(f"[{self.player.instance_id}] JACK sync enabled")
+            # Disable local play/pause buttons when JACK controls
+            self.play_button.setEnabled(False)
+            self.stop_button.setEnabled(False)
+            self.position_slider.setEnabled(False)
+        else:
+            logger.info(f"[{self.player.instance_id}] JACK sync disabled")
+            # Re-enable local controls
+            self.play_button.setEnabled(True)
+            self.stop_button.setEnabled(True)
+            self.position_slider.setEnabled(True)
     
     def eventFilter(self, obj, event):
         """Handle hover events for thumbnail mode."""
