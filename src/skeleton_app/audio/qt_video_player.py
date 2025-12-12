@@ -120,6 +120,12 @@ class QtVideoPlayer(QObject):
         self.sync_interval_ms = sync_interval_ms
         self.drift_threshold_ms = drift_threshold_ms
         
+        # Get sample rate from JACK if available
+        if jack_manager and jack_manager.is_connected():
+            self.sample_rate = jack_manager.client.samplerate
+        else:
+            self.sample_rate = 48000  # Default to 48kHz
+        
         # Media player
         self.player = QMediaPlayer()
         self.audio_output = QAudioOutput()
