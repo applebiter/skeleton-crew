@@ -109,6 +109,9 @@ class VideoPanel(QWidget):
                 sync_enabled=True
             )
             
+            # Start playback
+            player.play()
+            
             # Create embedded player widget
             player_widget = VideoPlayerWidget(player, self)
             player_widget.closed.connect(self._on_player_closed)
