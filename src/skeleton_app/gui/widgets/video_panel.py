@@ -120,11 +120,18 @@ class VideoPanel(QWidget):
             return
         
         try:
+            logger.info(f"Opening video file: {file_path}")
+            
             # Create player with video file
             instance_id, player = self.video_manager.create_player(
                 file_path=Path(file_path),
                 sync_enabled=True
             )
+            
+            logger.info(f"Player created: {instance_id}")
+            logger.info(f"Player state: {player.player.playbackState()}")
+            logger.info(f"Media status: {player.player.mediaStatus()}")
+            logger.info(f"Error: {player.player.error()}")
             
             # Check if file was loaded successfully
             if player.player.error() != QMediaPlayer.Error.NoError:
@@ -151,20 +158,35 @@ class VideoPanel(QWidget):
             # Switch to new tab
             self.tab_widget.setCurrentIndex(tab_index)
             
-            # Start playback
-            player.play()
+            logger.info(f"Tab created at index {tab_index}, switching to it")
+            
+            # Start playback - use QTimer to ensure widget is shown first
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(100, lambda: self._start_playback(player, instance_id))
             
             logger.info(f"Opened video in tab: {file_path} (instance: {instance_id})")
             self.video_opened.emit(instance_id, file_path)
             self._refresh_list()
             
         except Exception as e:
-            logger.error(f"Failed to open video: {e}")
+            logger.error(f"Failed to open video: {e}", exc_info=True)
             QMessageBox.critical(
                 self,
                 "Error",
                 f"Failed to open video:\n{str(e)}"
             )
+    
+    def _start_playback(self, player: QtVideoPlayer, instance_id: str):
+        """Start video playback after widget is set up."""
+        logger.info(f"Starting playback for {instance_id}")
+        logger.info(f"Player state before play: {player.player.playbackState()}")
+        logger.info(f"Media status before play: {player.player.mediaStatus()}")
+        
+        player.play()
+        
+        logger.info(f"Player state after play: {player.player.playbackState()}")
+        logger.info(f"Position: {player.get_position_ms()}ms")
+        logger.info(f"Duration: {player.get_duration_ms()}ms")
     
     def _on_tab_close_requested(self, instance_id: str):
         """Handle video player widget close."""
