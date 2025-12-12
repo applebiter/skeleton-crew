@@ -309,10 +309,10 @@ class VideoPlayerWidget(QWidget):
             file_name = self.player.file_path.name if self.player.file_path else "Video"
             self.detached_window.setWindowTitle(f"{file_name} - {self.player.instance_id}")
             
-            # Maximize window by default
-            self.detached_window.setWindowState(Qt.WindowMaximized)
+            # Set reasonable default size (can be resized by user)
+            self.detached_window.resize(1280, 720)
             
-            # Allow fullscreen
+            # Allow fullscreen, maximize, minimize
             self.detached_window.setWindowFlags(
                 Qt.Window | 
                 Qt.WindowMaximizeButtonHint | 
