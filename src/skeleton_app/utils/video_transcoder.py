@@ -278,21 +278,11 @@ class VideoTranscoder:
         media_info: MediaInfo,
         progress_callback=None
     ):
-        """Transcode video stream with NVIDIA NVENC hardware acceleration."""
-        cmd = ['ffmpeg']
-        
-        # Hardware-accelerated decoding
-        if job.use_hw_accel:
-            cmd.extend([
-                '-hwaccel', 'cuda',
-                '-hwaccel_output_format', 'cuda',
-            ])
-        
-        cmd.extend(['-i', str(job.source_path)])
+        """Transcode video stream with CPU encoding for all-intraframe compatibility."""
+        cmd = ['ffmpeg', '-i', str(job.source_path)]
         
         # Video encoding
         # Note: For all-intraframe (GOP=1), use CPU encoding as NVENC has GOP/B-frame validation issues
-        # We can still use NVENC for decoding to speed things up
         cmd.extend([
             '-c:v', 'libx264',
             '-preset', 'medium',  # Good balance of speed/quality
