@@ -364,12 +364,19 @@ class VideoPlayerWidget(QWidget):
     
     def _update_position(self):
         """Update position slider from player."""
-        if self.player.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
-            position = self.player.get_position_ms()
+        try:
+            if not self.player or not self.player.player:
+                return
             
-            # Don't update if user is dragging
-            if not self.position_slider.isSliderDown():
-                self.position_slider.setValue(position)
+            if self.player.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                position = self.player.get_position_ms()
+                
+                # Don't update if user is dragging
+                if not self.position_slider.isSliderDown():
+                    self.position_slider.setValue(position)
+        except RuntimeError:
+            # Player was deleted, stop timer
+            self.update_timer.stop()
     
     @Slot(int)
     def _on_position_changed(self, position_ms: int):
@@ -429,7 +436,16 @@ class VideoPlayerWidget(QWidget):
     
     def cleanup(self):
         """Cleanup resources."""
-        self.update_timer.stop()
+        # Stop timer first
+        if self.update_timer:
+            self.update_timer.stop()
+            self.update_timer.deleteLater()
+            self.update_timer = None
         
+        # Close detached window
         if self.detached_window:
             self.detached_window.close()
+            self.detached_window = None
+        
+        # Clear player reference
+        self.player = None

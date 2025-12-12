@@ -190,6 +190,17 @@ class VideoPanel(QWidget):
     
     def _on_tab_close_requested(self, instance_id: str):
         """Handle video player widget close."""
+        logger.info(f"Closing video player: {instance_id}")
+        
+        # Cleanup widget first (stops timers)
+        widget = self.player_widgets.pop(instance_id, None)
+        if widget:
+            widget.cleanup()
+            widget.deleteLater()
+        
+        # Then remove player
+        self.video_manager.remove_player(instance_id)
+        
         # Find and remove tab
         if instance_id in self.video_tabs:
             tab_index = self.video_tabs.pop(instance_id)
@@ -200,13 +211,6 @@ class VideoPanel(QWidget):
                 if idx > tab_index:
                     self.video_tabs[vid_id] = idx - 1
         
-        # Cleanup widget and player
-        widget = self.player_widgets.pop(instance_id, None)
-        if widget:
-            widget.cleanup()
-            widget.deleteLater()
-        
-        self.video_manager.remove_player(instance_id)
         self.video_closed.emit(instance_id)
         self._refresh_list()
         logger.info(f"Closed video player: {instance_id}")
