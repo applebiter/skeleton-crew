@@ -307,76 +307,60 @@ class QtVideoPlayer(QObject):
         self.error_occurred.emit(error_string)
     
     def _sync_to_jack(self):
-        """Synchronize video position to JACK transport."""
+        """
+        Synchronize video to JACK transport.
+        
+        This responds to JACK transport state changes (play/stop) and seeks,
+        but does NOT do continuous position correction (which causes stuttering).
+        """
         if not self.jack_manager or not self.jack_manager.is_connected():
-            self.sync_stats.state = SyncState.LOST
             return
         
-        # Get JACK transport state
-        jack_state = self.jack_manager.get_transport_state()
-        
-        # If JACK is stopped, pause video
-        if jack_state == "Stopped":
-            if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
-                self.pause()
-            return
-        
-        # If JACK is playing, ensure video is playing
-        if jack_state == "Rolling":
-            if self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
-                self.play()
-        
-        # Get JACK frame position
-        jack_frame = self.jack_manager.get_transport_frame()
-        
-        # Convert JACK frame to milliseconds (assuming 48kHz sample rate)
-        sample_rate = 48000  # TODO: Get actual sample rate from JACK
-        jack_position_ms = int((jack_frame / sample_rate) * 1000)
-        
-        # Get current video position
-        video_position_ms = self.player.position()
-        
-        # Calculate drift
-        drift_ms = jack_position_ms - video_position_ms
-        self.sync_stats.drift_ms = drift_ms
-        
-        # Update max drift
-        if abs(drift_ms) > abs(self.sync_stats.max_drift_ms):
-            self.sync_stats.max_drift_ms = drift_ms
-        
-        # Add to circular buffer
-        self.sync_buffer.add(drift_ms)
-        self.sync_stats.buffer_size = len(self.sync_buffer.buffer)
-        
-        # Determine sync state
-        if abs(drift_ms) > self.drift_threshold_ms * 2:
-            self.sync_stats.state = SyncState.LOST
-        elif abs(drift_ms) > self.drift_threshold_ms:
-            self.sync_stats.state = SyncState.DRIFT
-        elif self.sync_buffer.is_stable(threshold=5.0):
-            self.sync_stats.state = SyncState.SYNCED
-        else:
-            self.sync_stats.state = SyncState.SYNCING
-        
-        # Apply correction if needed
-        if abs(drift_ms) > self.drift_threshold_ms:
-            # Use buffered average for smooth correction
-            correction_ms = self.sync_buffer.median()
+        try:
+            # Get JACK transport state
+            jack_state = self.jack_manager.get_transport_state()
             
-            # Seek to corrected position
-            corrected_position = video_position_ms + int(correction_ms)
-            corrected_position = max(0, min(corrected_position, self.duration_ms))
+            # Respond to transport state changes
+            if jack_state == "Stopped":
+                # If JACK stopped, pause video
+                if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                    self.pause()
+                    logger.debug(f"[{self.instance_id}] JACK stopped, pausing video")
+            elif jack_state == "Rolling":
+                # If JACK playing, play video
+                if self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+                    self.play()
+                    logger.debug(f"[{self.instance_id}] JACK rolling, playing video")
             
-            self.player.setPosition(corrected_position)
-            self.sync_stats.corrections += 1
+            # Get JACK position
+            jack_frame = self.jack_manager.get_transport_frame()
+            jack_position_ms = int((jack_frame / self.sample_rate) * 1000)
             
-            logger.debug(
-                f"[{self.instance_id}] Sync correction: drift={drift_ms:.1f}ms, "
-                f"correction={correction_ms:.1f}ms"
-            )
-        
-        # Emit stats periodically
-        self.sync_stats_changed.emit(self.sync_stats)
+            # Get video position
+            video_position_ms = self.player.position()
+            
+            # Calculate drift (just for display, don't correct continuously)
+            drift_ms = jack_position_ms - video_position_ms
+            self.sync_stats.drift_ms = drift_ms
+            
+            # Update sync state for display
+            if abs(drift_ms) > 500:  # 500ms
+                self.sync_stats.state = SyncState.DRIFT
+            else:
+                self.sync_stats.state = SyncState.SYNCED
+            
+            # Only seek if drift is HUGE (user probably seeked JACK transport)
+            # This catches explicit seeks but avoids constant correction
+            if abs(drift_ms) > 2000:  # 2 seconds - clearly a deliberate seek
+                logger.info(f"[{self.instance_id}] Large drift detected ({drift_ms}ms), seeking to match JACK")
+                self.player.setPosition(jack_position_ms)
+                self.sync_stats.corrections += 1
+            
+            # Emit stats for UI
+            self.sync_stats_changed.emit(self.sync_stats)
+            
+        except Exception as e:
+            logger.error(f"[{self.instance_id}] Sync error: {e}")
     
     def cleanup(self):
         """Clean up resources."""

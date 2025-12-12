@@ -110,7 +110,7 @@ If the ideal resource isn't available, use what is:
 
 ```python
 # Try in order of preference (example with vision task)
-for model in ["ministral-3:7b", "ministral-3:3b"]:
+for model in ["ministral-3:8b", "ministral-3:3b"]:
     if model_available(model):
         return use_model(model)
 
