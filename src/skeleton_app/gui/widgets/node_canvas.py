@@ -399,21 +399,31 @@ class MiniMapView(QGraphicsView):
         self.viewport_rect.setZValue(1000)  # On top
         self.scene().addItem(self.viewport_rect)
         
-        # Fit entire scene in minimap
-        self.fitInView(self.scene().sceneRect(), Qt.KeepAspectRatio)
-        
         # Dragging state
         self._dragging = False
         self._drag_start_pos = QPointF()
         
-        # Update viewport rectangle
-        self.update_viewport_rect()
+        # Initial fit
+        self.refit_minimap()
     
     def update_viewport_rect(self):
         """Update the viewport rectangle to match main view."""
         try:
-            # Get visible rect in scene coordinates from main view
-            visible_rect = self.main_view.mapToScene(self.main_view.viewport().rect()).boundingRect()
+            # Get the visible area in the main view's scene coordinates
+            # This accounts for zoom and pan transformations
+            view_rect = self.main_view.viewport().rect()
+            top_left = self.main_view.mapToScene(view_rect.topLeft())
+            top_right = self.main_view.mapToScene(view_rect.topRight())
+            bottom_left = self.main_view.mapToScene(view_rect.bottomLeft())
+            bottom_right = self.main_view.mapToScene(view_rect.bottomRight())
+            
+            # Calculate bounding rect of these points
+            min_x = min(top_left.x(), top_right.x(), bottom_left.x(), bottom_right.x())
+            max_x = max(top_left.x(), top_right.x(), bottom_left.x(), bottom_right.x())
+            min_y = min(top_left.y(), top_right.y(), bottom_left.y(), bottom_right.y())
+            max_y = max(top_left.y(), top_right.y(), bottom_left.y(), bottom_right.y())
+            
+            visible_rect = QRectF(min_x, min_y, max_x - min_x, max_y - min_y)
             self.viewport_rect.setRect(visible_rect)
         except RuntimeError:
             # Object may have been deleted
@@ -422,9 +432,12 @@ class MiniMapView(QGraphicsView):
     def refit_minimap(self):
         """Refit minimap to show entire scene. Call this when nodes are added/removed."""
         if self.main_view.nodes:
-            # Fit to actual content bounds
+            # Fit to actual content bounds with some padding
             content_rect = self.scene().itemsBoundingRect()
-            self.fitInView(content_rect, Qt.KeepAspectRatio)
+            # Add 10% padding around content
+            padding = max(content_rect.width(), content_rect.height()) * 0.1
+            padded_rect = content_rect.adjusted(-padding, -padding, padding, padding)
+            self.fitInView(padded_rect, Qt.KeepAspectRatio)
         else:
             # No nodes yet - use default scene rect
             self.fitInView(self.scene().sceneRect(), Qt.KeepAspectRatio)
