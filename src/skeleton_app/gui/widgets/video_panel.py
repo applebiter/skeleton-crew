@@ -18,6 +18,7 @@ from PySide6.QtMultimedia import QMediaPlayer
 
 from skeleton_app.audio.qt_video_player import QtVideoPlayerManager, QtVideoPlayer
 from skeleton_app.gui.widgets.video_player_widget import VideoPlayerWidget
+from skeleton_app.gui.widgets.screen_capture_widget import ScreenCaptureWidget
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QTabWidget
@@ -48,6 +49,8 @@ class VideoPanel(QWidget):
         self.tab_widget = tab_widget
         self.video_tabs: Dict[str, int] = {}  # instance_id -> tab_index
         self.player_widgets: Dict[str, VideoPlayerWidget] = {}
+        self.capture_widgets: Dict[str, ScreenCaptureWidget] = {}  # instance_id -> capture widget
+        self.capture_counter = 0
         self._setup_ui()
         
         # Auto-refresh timer
@@ -70,6 +73,11 @@ class VideoPanel(QWidget):
         self.open_button = QPushButton("Open Video")
         self.open_button.clicked.connect(self._on_open_video)
         header_layout.addWidget(self.open_button)
+        
+        # Screen capture button
+        self.capture_button = QPushButton("📹 Screen Capture")
+        self.capture_button.clicked.connect(self._on_screen_capture)
+        header_layout.addWidget(self.capture_button)
         
         layout.addLayout(header_layout)
         
@@ -175,6 +183,59 @@ class VideoPanel(QWidget):
                 "Error",
                 f"Failed to open video:\n{str(e)}"
             )
+    
+    def _on_screen_capture(self):
+        """Open a screen capture tab."""
+        try:
+            self.capture_counter += 1
+            instance_id = f"screen_capture_{self.capture_counter}"
+            
+            # Create screen capture widget
+            capture_widget = ScreenCaptureWidget(instance_id)
+            capture_widget.closed.connect(lambda: self._on_capture_close_requested(instance_id))
+            
+            # Store reference
+            self.capture_widgets[instance_id] = capture_widget
+            
+            # Add as tab in main tab widget
+            tab_name = f"Screen Capture {self.capture_counter}"
+            tab_index = self.tab_widget.addTab(capture_widget, tab_name)
+            self.video_tabs[instance_id] = tab_index
+            
+            # Switch to new tab
+            self.tab_widget.setCurrentIndex(tab_index)
+            
+            logger.info(f"Opened screen capture in tab: {tab_name}")
+            
+        except Exception as e:
+            logger.error(f"Failed to open screen capture: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to open screen capture:\n{str(e)}"
+            )
+    
+    def _on_capture_close_requested(self, instance_id: str):
+        """Handle screen capture widget close."""
+        logger.info(f"Closing screen capture: {instance_id}")
+        
+        # Cleanup widget
+        widget = self.capture_widgets.pop(instance_id, None)
+        if widget:
+            widget.cleanup()
+            widget.deleteLater()
+        
+        # Find and remove tab
+        if instance_id in self.video_tabs:
+            tab_index = self.video_tabs.pop(instance_id)
+            self.tab_widget.removeTab(tab_index)
+            
+            # Update remaining tab indices
+            for vid_id, idx in list(self.video_tabs.items()):
+                if idx > tab_index:
+                    self.video_tabs[vid_id] = idx - 1
+        
+        logger.info(f"Screen capture closed: {instance_id}")
     
     def _start_playback(self, player: QtVideoPlayer, instance_id: str):
         """Start video playback after widget is set up."""
