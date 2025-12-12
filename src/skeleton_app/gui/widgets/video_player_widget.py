@@ -1,48 +1,76 @@
 """
-Embedded video player widget with controls.
+Flexible video player widget with multiple display modes.
 """
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider, 
     QLabel, QStyle, QSizePolicy
 )
-from PySide6.QtCore import Qt, QTimer, Signal, Slot
+from PySide6.QtCore import Qt, QTimer, Signal, Slot, QEvent
 from PySide6.QtMultimedia import QMediaPlayer
 
 from skeleton_app.audio.qt_video_player import QtVideoPlayer
 
 logger = logging.getLogger(__name__)
 
+VideoMode = Literal["thumbnail", "embedded", "detached"]
+
 
 class VideoPlayerWidget(QWidget):
     """
-    Embedded video player with controls and detach capability.
+    Flexible video player with configurable display modes.
     
-    Shows video widget, playback controls, and timeline scrubber.
-    Can be detached to separate window.
+    Modes:
+    - thumbnail: Small preview, no controls, plays on hover, click to promote
+    - embedded: Full controls, embedded in panel, can detach
+    - detached: Separate maximized window, fullscreen capable
+    
+    Configuration:
+    - show_controls: Show playback controls
+    - enable_audio: Enable audio output (default muted for JACK)
+    - play_on_hover: Auto-play preview on mouse hover
     """
     
     # Signals
     detached = Signal(str)  # instance_id
     closed = Signal(str)  # instance_id
+    clicked = Signal(str)  # instance_id (for thumbnail mode)
     
-    def __init__(self, player: QtVideoPlayer, parent: Optional[QWidget] = None):
+    def __init__(
+        self, 
+        player: QtVideoPlayer, 
+        parent: Optional[QWidget] = None,
+        mode: VideoMode = "embedded",
+        show_controls: bool = True,
+        enable_audio: bool = False,
+        play_on_hover: bool = False
+    ):
         super().__init__(parent)
         self.player = player
+        self.mode = mode
+        self.show_controls = show_controls
+        self.enable_audio = enable_audio
+        self.play_on_hover = play_on_hover
         self.is_detached = False
         self.detached_window: Optional[QWidget] = None
+        self._was_playing_before_hover = False
         
         self._setup_ui()
         self._connect_signals()
+        self._apply_mode_settings()
         
         # Update timer for position slider
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._update_position)
         self.update_timer.start(100)  # Update 10 times per second
+        
+        # Install event filter for hover if needed
+        if self.play_on_hover:
+            self.installEventFilter(self)
     
     def _setup_ui(self):
         """Setup the user interface."""
@@ -120,6 +148,10 @@ class VideoPlayerWidget(QWidget):
         
         layout.addLayout(control_layout)
         
+        # Store control layout reference
+        self.control_widget = QWidget()
+        self.control_widget.setLayout(control_layout)
+        
         # Info bar
         info_layout = QHBoxLayout()
         
@@ -134,10 +166,36 @@ class VideoPlayerWidget(QWidget):
         self.sync_label = QLabel("Sync: --")
         info_layout.addWidget(self.sync_label)
         
-        layout.addLayout(info_layout)
+        self.info_widget = QWidget()
+        self.info_widget.setLayout(info_layout)
+        layout.addWidget(self.info_widget)
+    
+    def _apply_mode_settings(self):
+        """Apply settings based on current mode."""
+        if self.mode == "thumbnail":
+            # Thumbnail mode: minimal UI
+            self.control_widget.setVisible(False)
+            self.info_widget.setVisible(False)
+            self.player.audio_output.setMuted(True)
+            self.setCursor(Qt.PointingHandCursor)
+            
+            # Set size constraints for thumbnail
+            self.setMaximumHeight(200)
+            self.video_widget.setMaximumHeight(200)
+            
+        elif self.mode == "embedded":
+            # Embedded mode: full controls
+            self.control_widget.setVisible(self.show_controls)
+            self.info_widget.setVisible(self.show_controls)
+            self.player.audio_output.setMuted(not self.enable_audio)
+            
+        elif self.mode == "detached":
+            # Detached mode: handled separately in detach window
+            pass
         
-        # Mute by default
-        self.player.audio_output.setMuted(True)
+        # Apply audio setting
+        if not self.enable_audio:
+            self.player.audio_output.setMuted(True)
     
     def _connect_signals(self):
         """Connect player signals."""
@@ -145,6 +203,33 @@ class VideoPlayerWidget(QWidget):
         self.player.duration_changed.connect(self._on_duration_changed)
         self.player.state_changed.connect(self._on_state_changed)
         self.player.sync_stats_changed.connect(self._on_sync_stats_changed)
+    
+    def eventFilter(self, obj, event):
+        """Handle hover events for thumbnail mode."""
+        if self.mode == "thumbnail" and self.play_on_hover:
+            if event.type() == QEvent.Enter:
+                # Mouse entered - start playing preview
+                self._was_playing_before_hover = (
+                    self.player.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+                )
+                if not self._was_playing_before_hover:
+                    self.player.play()
+                    logger.debug(f"[{self.player.instance_id}] Started hover preview")
+                    
+            elif event.type() == QEvent.Leave:
+                # Mouse left - pause if we started it
+                if not self._was_playing_before_hover:
+                    self.player.pause()
+                    logger.debug(f"[{self.player.instance_id}] Stopped hover preview")
+        
+        return super().eventFilter(obj, event)
+    
+    def mousePressEvent(self, event):
+        """Handle mouse click in thumbnail mode."""
+        if self.mode == "thumbnail" and event.button() == Qt.LeftButton:
+            self.clicked.emit(self.player.instance_id)
+            logger.info(f"[{self.player.instance_id}] Thumbnail clicked")
+        super().mousePressEvent(event)
     
     def _toggle_play_pause(self):
         """Toggle play/pause."""
@@ -333,6 +418,16 @@ class VideoPlayerWidget(QWidget):
         minutes = seconds // 60
         seconds = seconds % 60
         return f"{minutes:02d}:{seconds:02d}"
+    
+    def set_mode(self, mode: VideoMode):
+        """Change the display mode dynamically."""
+        self.mode = mode
+        self._apply_mode_settings()
+        
+        if mode == "thumbnail" and self.play_on_hover:
+            self.installEventFilter(self)
+        else:
+            self.removeEventFilter(self)
     
     def cleanup(self):
         """Cleanup resources."""
