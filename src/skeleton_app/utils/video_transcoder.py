@@ -301,7 +301,7 @@ class VideoTranscoder:
                 '-cq', str(job.video_quality),  # Quality level (0-51)
                 '-b:v', '0',  # Let CQ control bitrate
                 '-g', '1',  # GOP size 1 = all intraframe (every frame is keyframe)
-                '-bf', '0',  # No B-frames
+                # Note: Don't set -bf with GOP=1, NVENC will automatically use no B-frames
             ])
         else:
             # CPU fallback (libx264)
