@@ -125,7 +125,7 @@ class VideoPanel(QWidget):
             # Create player with video file
             instance_id, player = self.video_manager.create_player(
                 file_path=Path(file_path),
-                sync_enabled=True
+                sync_enabled=False  # Disable sync by default - enable via checkbox if needed
             )
             
             logger.info(f"Player created: {instance_id}")
