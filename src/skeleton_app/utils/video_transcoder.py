@@ -357,20 +357,26 @@ class VideoTranscoder:
         progress_callback=None
     ):
         """Extract/transcode audio stream."""
-        if media_info.audio_codec == 'none':
-            logger.warning("No audio stream found")
+        if media_info.audio_codec == 'none' or not media_info.audio_codec:
+            logger.warning("No audio stream found, creating empty marker")
+            # Create empty marker file so we know there's no audio
+            job.output_audio_path.touch()
+            if progress_callback:
+                progress_callback(100, "No audio stream")
             return
         
         # Build ffmpeg command based on target format
         cmd = ['ffmpeg', '-i', str(job.source_path)]
         
+        # Select audio stream (try first audio stream, or use default if only one)
+        # Don't use explicit mapping - let ffmpeg auto-detect
+        cmd.extend(['-vn'])  # No video
+        
         if job.audio_format is None:
             # Keep original - just copy
-            cmd.extend(['-vn', '-c:a', 'copy'])
+            cmd.extend(['-c:a', 'copy'])
         else:
             # Transcode to target format
-            cmd.extend(['-vn'])  # No video
-            
             if job.audio_format == AudioFormat.FLAC:
                 cmd.extend(['-c:a', 'flac'])
             elif job.audio_format == AudioFormat.OGG:
@@ -395,8 +401,12 @@ class VideoTranscoder:
             universal_newlines=True
         )
         
+        # Collect stderr for error reporting
+        stderr_lines = []
+        
         # Parse progress
         for line in process.stderr:
+            stderr_lines.append(line)
             if progress_callback and 'time=' in line:
                 try:
                     time_str = line.split('time=')[1].split()[0]
@@ -409,7 +419,10 @@ class VideoTranscoder:
         
         returncode = process.wait()
         if returncode != 0:
-            raise RuntimeError(f"ffmpeg audio extraction failed with code {returncode}")
+            # Show last 20 lines of stderr for debugging
+            error_output = '\n'.join(stderr_lines[-20:])
+            logger.error(f"ffmpeg audio extraction stderr:\n{error_output}")
+            raise RuntimeError(f"ffmpeg audio extraction failed with code {returncode}\n{error_output}")
     
     def batch_transcode(
         self,
