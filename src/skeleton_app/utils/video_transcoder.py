@@ -31,14 +31,17 @@ class TranscodeJob:
     """Transcode job configuration."""
     source_path: Path
     output_dir: Path
-    video_quality: int = 8  # MJPEG quality 1-31 (lower = better)
+    video_codec: str = "h264_nvenc"  # Use NVIDIA hardware encoder
+    video_quality: int = 23  # CRF for h264_nvenc (lower = better)
+    use_hw_accel: bool = True  # Use GPU acceleration
     audio_format: Optional[AudioFormat] = None  # None = keep original
     audio_bitrate: str = "320k"  # For lossy formats
     
     @property
     def output_video_path(self) -> Path:
         """Get output video file path."""
-        return self.output_dir / f"{self.source_path.stem}_video.avi"
+        ext = "mp4" if "nvenc" in self.video_codec else "avi"
+        return self.output_dir / f"{self.source_path.stem}_video.{ext}"
     
     @property
     def output_audio_path(self) -> Path:
@@ -64,18 +67,24 @@ class MediaInfo:
 
 class VideoTranscoder:
     """
-    Transcode videos to frame-accurate MJPEG with separate audio.
+    Transcode videos to frame-accurate format with separate audio.
+    
+    Uses NVIDIA NVENC hardware acceleration for fast encoding.
     
     Features:
-    - MJPEG video (every frame is keyframe - perfect for scrubbing)
+    - H.264 all-intraframe (every frame is keyframe - perfect for scrubbing)
+    - NVIDIA GTX 1050 Ti hardware encoding (much faster than CPU)
+    - Hardware-accelerated decoding (NVDEC/CUVID)
     - Separate audio file (flac/ogg/opus/wav/mp3)
     - Preserve aspect ratio and framerate
     - Progress callbacks
     """
     
-    def __init__(self):
+    def __init__(self, use_hw_accel: bool = True):
         self.current_job: Optional[TranscodeJob] = None
         self.is_running = False
+        self.use_hw_accel = use_hw_accel
+        self._check_nvenc_support()
     
     def probe_media(self, file_path: Path) -> MediaInfo:
         """Get media file information using ffprobe."""
@@ -158,17 +167,19 @@ class VideoTranscoder:
         self,
         source_path: Path,
         output_dir: Path,
-        video_quality: int = 8,
+        video_quality: int = 23,
         audio_format: Optional[AudioFormat] = None,
         progress_callback=None
     ) -> Tuple[Path, Path]:
         """
-        Transcode video to MJPEG + separate audio.
+        Transcode video to frame-accurate H.264 + separate audio.
+        
+        Uses NVIDIA NVENC for hardware-accelerated encoding.
         
         Args:
             source_path: Source video file
             output_dir: Output directory
-            video_quality: MJPEG quality 1-31 (lower = better, 8 recommended)
+            video_quality: CRF quality 0-51 (lower = better, 23 = high quality)
             audio_format: Target audio format (None = keep original)
             progress_callback: Callable(percent: float, message: str)
         
@@ -192,18 +203,22 @@ class VideoTranscoder:
             audio_format = self.get_preferred_audio_format(media_info.audio_codec)
         
         # Create job
+        codec = "h264_nvenc" if self.use_hw_accel else "libx264"
         job = TranscodeJob(
             source_path=source_path,
             output_dir=output_dir,
+            video_codec=codec,
             video_quality=video_quality,
+            use_hw_accel=self.use_hw_accel,
             audio_format=audio_format
         )
         
         self.current_job = job
-        self.is_running = True
-        
-        try:
-            # Transcode video to MJPEG
+        self.is_running = Truewith NVENC
+            codec_name = "NVENC (GPU)" if job.use_hw_accel else "x264 (CPU)"
+            logger.info(f"Transcoding video with {codec_name} (quality {video_quality})")
+            if progress_callback:
+                progress_callback(0, f"Transcoding video with {codec_name}
             logger.info(f"Transcoding video to MJPEG (quality {video_quality})")
             if progress_callback:
                 progress_callback(0, "Transcoding video to MJPEG...")
@@ -235,17 +250,46 @@ class VideoTranscoder:
         job: TranscodeJob,
         media_info: MediaInfo,
         progress_callback=None
-    ):
-        """Transcode video stream to MJPEG."""
-        cmd = [
-            'ffmpeg',
-            '-i', str(job.source_path),
-            '-c:v', 'mjpeg',
-            '-q:v', str(job.video_quality),
+    ):with NVIDIA NVENC hardware acceleration."""
+        cmd = ['ffmpeg']
+        
+        # Hardware-accelerated decoding
+        if job.use_hw_accel:
+            cmd.extend([
+                '-hwaccel', 'cuda',
+                '-hwaccel_output_format', 'cuda',
+            ])
+        
+        cmd.extend(['-i', str(job.source_path)])
+        
+        # Video encoding
+        if job.use_hw_accel:
+            # NVIDIA NVENC encoding
+            cmd.extend([
+                '-c:v', 'h264_nvenc',
+                '-preset', 'p7',  # p7 = highest quality preset
+                '-tune', 'hq',  # High quality tuning
+                '-rc', 'vbr',  # Variable bitrate
+                '-cq', str(job.video_quality),  # Quality level (0-51)
+                '-b:v', '0',  # Let CQ control bitrate
+                '-g', '1',  # GOP size 1 = all intraframe (every frame is keyframe)
+                '-bf', '0',  # No B-frames
+            ])
+        else:
+            # CPU fallback (libx264)
+            cmd.extend([
+                '-c:v', 'libx264',
+                '-preset', 'slow',
+                '-crf', str(job.video_quality),
+                '-g', '1',  # All intraframe
+                '-bf', '0',
+            ])
+        
+        cmd.extend([
             '-an',  # No audio
             '-y',  # Overwrite
             str(job.output_video_path)
-        ]
+        ])
         
         logger.debug(f"Running: {' '.join(cmd)}")
         
