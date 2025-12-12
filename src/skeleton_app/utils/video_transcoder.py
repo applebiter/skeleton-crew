@@ -278,18 +278,37 @@ class VideoTranscoder:
         media_info: MediaInfo,
         progress_callback=None
     ):
-        """Transcode video stream with CPU encoding for all-intraframe compatibility."""
-        cmd = ['ffmpeg', '-i', str(job.source_path)]
+        """Transcode video stream with NVIDIA NVENC hardware acceleration."""
+        cmd = ['ffmpeg']
+        
+        # Hardware-accelerated decoding
+        if job.use_hw_accel:
+            cmd.extend(['-hwaccel', 'cuda'])
+        
+        cmd.extend(['-i', str(job.source_path)])
         
         # Video encoding
-        # Note: For all-intraframe (GOP=1), use CPU encoding as NVENC has GOP/B-frame validation issues
-        cmd.extend([
-            '-c:v', 'libx264',
-            '-preset', 'medium',  # Good balance of speed/quality
-            '-crf', str(job.video_quality),
-            '-g', '1',  # Every frame is a keyframe
-            '-x264-params', 'keyint=1:scenecut=0',  # Force all I-frames
-        ])
+        if job.use_hw_accel:
+            # NVIDIA NVENC encoding with frequent keyframes (not all-intraframe)
+            # GOP of 30 frames = ~1 second keyframe interval, good for scrubbing
+            cmd.extend([
+                '-c:v', 'h264_nvenc',
+                '-preset', 'p7',  # p7 = highest quality preset
+                '-tune', 'hq',  # High quality tuning
+                '-rc', 'vbr',  # Variable bitrate
+                '-cq', str(job.video_quality),  # Quality level (0-51)
+                '-b:v', '0',  # Let CQ control bitrate
+                '-g', '30',  # Keyframe every 30 frames (~1 second)
+                '-sc_threshold', '0',  # Disable scene detection for consistent GOP
+            ])
+        else:
+            # CPU fallback
+            cmd.extend([
+                '-c:v', 'libx264',
+                '-preset', 'medium',
+                '-crf', str(job.video_quality),
+                '-g', '30',
+            ])
         
         cmd.extend([
             '-an',  # No audio
