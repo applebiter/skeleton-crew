@@ -568,27 +568,58 @@ class NodeCanvasWidget(QWidget):
             return
         
         # Create nodes for each client
+        # Special handling: split "system" into separate input/output nodes
         clients = set()
         for port in output_ports + input_ports:
             client_name = port.split(':')[0]
             clients.add(client_name)
         
         for client_name in sorted(clients):
-            # Use old position if available
-            x, y = old_positions.get(client_name, (None, None))
-            node = self.canvas.add_node(client_name, x, y)
+            # Check if this client has both inputs and outputs
+            has_outputs = any(port.startswith(client_name + ':') for port in output_ports)
+            has_inputs = any(port.startswith(client_name + ':') for port in input_ports)
             
-            # Add output ports
-            for port in output_ports:
-                if port.startswith(client_name + ':'):
-                    port_name = ':'.join(port.split(':')[1:])
-                    node.add_output_port(port_name)
-            
-            # Add input ports
-            for port in input_ports:
-                if port.startswith(client_name + ':'):
-                    port_name = ':'.join(port.split(':')[1:])
-                    node.add_input_port(port_name)
+            # Special case: split "system" into two nodes
+            if client_name == "system" and has_outputs and has_inputs:
+                # Create output node (capture ports)
+                out_node_name = "system (out)"
+                x_out, y_out = old_positions.get(out_node_name, (None, None))
+                out_node = self.canvas.add_node(out_node_name, x_out, y_out)
+                
+                for port in output_ports:
+                    if port.startswith(client_name + ':'):
+                        port_name = ':'.join(port.split(':')[1:])
+                        port_item = out_node.add_output_port(port_name)
+                        # Update full name to match actual JACK port
+                        port_item.full_name = f"{client_name}:{port_name}"
+                
+                # Create input node (playback ports)
+                in_node_name = "system (in)"
+                x_in, y_in = old_positions.get(in_node_name, (None, None))
+                in_node = self.canvas.add_node(in_node_name, x_in, y_in)
+                
+                for port in input_ports:
+                    if port.startswith(client_name + ':'):
+                        port_name = ':'.join(port.split(':')[1:])
+                        port_item = in_node.add_input_port(port_name)
+                        # Update full name to match actual JACK port
+                        port_item.full_name = f"{client_name}:{port_name}"
+            else:
+                # Normal client - single node
+                x, y = old_positions.get(client_name, (None, None))
+                node = self.canvas.add_node(client_name, x, y)
+                
+                # Add output ports
+                for port in output_ports:
+                    if port.startswith(client_name + ':'):
+                        port_name = ':'.join(port.split(':')[1:])
+                        node.add_output_port(port_name)
+                
+                # Add input ports
+                for port in input_ports:
+                    if port.startswith(client_name + ':'):
+                        port_name = ':'.join(port.split(':')[1:])
+                        node.add_input_port(port_name)
         
         # Add connections
         try:
