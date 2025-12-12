@@ -14,6 +14,8 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 
 from skeleton_app.config import Config
+from skeleton_app.database import Database
+from skeleton_app.service_discovery import ServiceDiscovery
 from skeleton_app.gui.widgets.transport_panel import TransportPanel
 from skeleton_app.gui.widgets.cluster_panel import ClusterPanel
 from skeleton_app.gui.widgets.patchbay_widget import PatchbayWidget
@@ -48,6 +50,10 @@ class MainWindow(QMainWindow):
         # xjadeo manager
         self.xjadeo_manager = XjadeoManager()
         
+        # Database and service discovery
+        self.database: Optional[Database] = None
+        self.service_discovery: Optional[ServiceDiscovery] = None
+        
         # Setup UI
         self.setWindowTitle("Skeleton Crew - JACK Control Hub")
         self.setMinimumSize(1200, 800)
@@ -61,6 +67,9 @@ class MainWindow(QMainWindow):
         
         # Initialize JACK connection
         self._init_jack()
+        
+        # Initialize service discovery (async)
+        self._init_service_discovery()
         
         # Status update timer
         self.status_timer = QTimer()
@@ -269,6 +278,38 @@ class MainWindow(QMainWindow):
         else:
             self.transport_status_label.setText("Transport: N/A")
     
+    def _init_service_discovery(self):
+        """Initialize service discovery asynchronously."""
+        import asyncio
+        
+        # Create event loop in separate thread if needed
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        async def _async_init():
+            # Initialize database
+            if self.config.database:
+                self.database = Database(self.config.database.url)
+                await self.database.connect()
+                await self.database.initialize_schema()
+            
+            # Initialize service discovery
+            self.service_discovery = ServiceDiscovery(
+                node_id=self.config.node.id,
+                database=self.database,
+                heartbeat_interval=10
+            )
+            await self.service_discovery.start()
+            
+            # Update cluster panel
+            self.cluster_panel.set_service_discovery(self.service_discovery)
+        
+        # Run async initialization
+        asyncio.ensure_future(_async_init())
+    
     def _open_video(self):
         """Open video file via File menu."""
         # Delegate to video panel
@@ -299,6 +340,24 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Handle window close event."""
         self._save_geometry()
+        
+        # Stop service discovery
+        if self.service_discovery:
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(self.service_discovery.stop())
+            except Exception:
+                pass
+        
+        # Disconnect database
+        if self.database:
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(self.database.disconnect())
+            except Exception:
+                pass
         
         # Stop all video players
         if self.xjadeo_manager:

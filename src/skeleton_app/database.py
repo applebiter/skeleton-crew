@@ -196,6 +196,59 @@ class Database:
                 ON transcription_jobs(status, priority, created_at)
             """)
             
+            # Service registry table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS services (
+                    id SERIAL PRIMARY KEY,
+                    node_id VARCHAR(255) NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+                    service_type VARCHAR(100) NOT NULL,
+                    service_name VARCHAR(255) NOT NULL,
+                    endpoint TEXT,
+                    port INTEGER,
+                    protocol VARCHAR(50),
+                    capabilities JSONB NOT NULL DEFAULT '{}',
+                    metadata JSONB NOT NULL DEFAULT '{}',
+                    status VARCHAR(50) NOT NULL DEFAULT 'available',
+                    health_status VARCHAR(50) NOT NULL DEFAULT 'healthy',
+                    last_heartbeat TIMESTAMP NOT NULL DEFAULT NOW(),
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    UNIQUE(node_id, service_type, service_name)
+                )
+            """)
+            
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_services_node 
+                ON services(node_id)
+            """)
+            
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_services_type 
+                ON services(service_type, status)
+            """)
+            
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_services_heartbeat 
+                ON services(last_heartbeat)
+            """)
+            
+            # Service health history table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS service_health_history (
+                    id SERIAL PRIMARY KEY,
+                    service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+                    health_status VARCHAR(50) NOT NULL,
+                    response_time_ms FLOAT,
+                    error_message TEXT,
+                    checked_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """)
+            
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_service_health_service 
+                ON service_health_history(service_id, checked_at)
+            """)
+            
             logger.info("Database schema initialized")
     
     async def execute(self, query: str, *args):
