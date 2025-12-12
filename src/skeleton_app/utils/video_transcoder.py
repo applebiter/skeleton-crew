@@ -291,27 +291,15 @@ class VideoTranscoder:
         cmd.extend(['-i', str(job.source_path)])
         
         # Video encoding
-        if job.use_hw_accel:
-            # NVIDIA NVENC encoding - use infinite GOP with forced keyframes for all-intraframe
-            cmd.extend([
-                '-c:v', 'h264_nvenc',
-                '-preset', 'p7',  # p7 = highest quality preset
-                '-tune', 'hq',  # High quality tuning
-                '-rc', 'vbr',  # Variable bitrate
-                '-cq', str(job.video_quality),  # Quality level (0-51)
-                '-b:v', '0',  # Let CQ control bitrate
-                '-forced-idr', '1',  # Force every frame to be an IDR frame
-                '-g', '1',  # Keyframe every frame
-            ])
-        else:
-            # CPU fallback (libx264)
-            cmd.extend([
-                '-c:v', 'libx264',
-                '-preset', 'slow',
-                '-crf', str(job.video_quality),
-                '-g', '1',  # All intraframe
-                '-bf', '0',
-            ])
+        # Note: For all-intraframe (GOP=1), use CPU encoding as NVENC has GOP/B-frame validation issues
+        # We can still use NVENC for decoding to speed things up
+        cmd.extend([
+            '-c:v', 'libx264',
+            '-preset', 'medium',  # Good balance of speed/quality
+            '-crf', str(job.video_quality),
+            '-g', '1',  # Every frame is a keyframe
+            '-x264-params', 'keyint=1:scenecut=0',  # Force all I-frames
+        ])
         
         cmd.extend([
             '-an',  # No audio
