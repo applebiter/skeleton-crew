@@ -15,12 +15,12 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGraphicsView, QGraphicsScene,
     QGraphicsItem, QGraphicsRectItem, QGraphicsTextItem, QGraphicsLineItem,
     QGraphicsEllipseItem, QPushButton, QComboBox, QLabel, QToolBar,
-    QInputDialog, QMessageBox, QFileDialog
+    QInputDialog, QMessageBox, QFileDialog, QSizePolicy
 )
-from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, Signal, QLineF
+from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, Signal, QLineF, QSize
 from PySide6.QtGui import (
     QPen, QBrush, QColor, QPainter, QPainterPath,
-    QLinearGradient, QFont, QAction
+    QLinearGradient, QFont, QAction, QResizeEvent
 )
 
 from skeleton_app.audio.jack_client import JackClientManager
@@ -232,6 +232,7 @@ class NodeCanvas(QGraphicsView):
     # Signals
     connection_requested = Signal(str, str)  # output_port, input_port
     disconnection_requested = Signal(str, str)  # output_port, input_port
+    viewport_changed = Signal()  # Emitted when viewport moves/zooms
     
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -254,6 +255,9 @@ class NodeCanvas(QGraphicsView):
         # Auto-layout tracking
         self._next_node_x = 50
         self._next_node_y = 50
+        
+        # Minimap
+        self.minimap: Optional['MiniMapView'] = None
     
     def add_node(self, client_name: str, x: Optional[float] = None, y: Optional[float] = None) -> NodeItem:
         """Add a node to the canvas."""
@@ -340,6 +344,12 @@ class NodeCanvas(QGraphicsView):
             self.scale(zoom_factor, zoom_factor)
         else:
             self.scale(1 / zoom_factor, 1 / zoom_factor)
+        self.viewport_changed.emit()
+    
+    def scrollContentsBy(self, dx: int, dy: int):
+        """Override to emit viewport changed signal."""
+        super().scrollContentsBy(dx, dy)
+        self.viewport_changed.emit()
     
     def get_node_positions(self) -> Dict[str, Tuple[float, float]]:
         """Get positions of all nodes."""
@@ -350,6 +360,82 @@ class NodeCanvas(QGraphicsView):
         for name, (x, y) in positions.items():
             if name in self.nodes:
                 self.nodes[name].setPos(x, y)
+
+
+class MiniMapView(QGraphicsView):
+    """
+    Minimap overlay showing entire canvas with viewport rectangle.
+    """
+    
+    viewport_move_requested = Signal(QPointF)  # Request to center main view at this point
+    
+    def __init__(self, main_view: NodeCanvas, parent: Optional[QWidget] = None):
+        super().__init__(main_view.scene, parent)
+        self.main_view = main_view
+        
+        # Style
+        self.setRenderHint(QPainter.Antialiasing)
+        self.setBackgroundBrush(QBrush(QColor(20, 20, 20, 180)))  # Semi-transparent
+        self.setFrameStyle(2)  # Box frame
+        
+        # Fixed size
+        self.setFixedSize(200, 150)
+        
+        # Disable interaction (we'll handle it manually)
+        self.setInteractive(False)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        # Viewport rectangle
+        self.viewport_rect = QGraphicsRectItem()
+        self.viewport_rect.setPen(QPen(QColor(255, 100, 100), 2))
+        self.viewport_rect.setBrush(QBrush(QColor(255, 100, 100, 30)))
+        self.viewport_rect.setZValue(1000)  # On top
+        self.scene().addItem(self.viewport_rect)
+        
+        # Fit entire scene in minimap
+        self.fitInView(self.scene().sceneRect(), Qt.KeepAspectRatio)
+        
+        # Dragging state
+        self._dragging = False
+        self._drag_start_pos = QPointF()
+        
+        # Update viewport rectangle
+        self.update_viewport_rect()
+    
+    def update_viewport_rect(self):
+        """Update the viewport rectangle to match main view."""
+        # Get visible rect in scene coordinates
+        visible_rect = self.main_view.mapToScene(self.main_view.viewport().rect()).boundingRect()
+        self.viewport_rect.setRect(visible_rect)
+    
+    def mousePressEvent(self, event):
+        """Start dragging viewport."""
+        if event.button() == Qt.LeftButton:
+            self._dragging = True
+            self._drag_start_pos = self.mapToScene(event.pos())
+            # Center main view on clicked point
+            self.viewport_move_requested.emit(self._drag_start_pos)
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """Drag viewport rectangle."""
+        if self._dragging:
+            scene_pos = self.mapToScene(event.pos())
+            self.viewport_move_requested.emit(scene_pos)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """Stop dragging."""
+        if event.button() == Qt.LeftButton:
+            self._dragging = False
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 
 
 class NodeCanvasWidget(QWidget):
@@ -426,6 +512,20 @@ class NodeCanvasWidget(QWidget):
         self.canvas.connection_requested.connect(self._on_connection_requested)
         self.canvas.disconnection_requested.connect(self._on_disconnection_requested)
         layout.addWidget(self.canvas)
+        
+        # Create minimap overlay
+        self.minimap = MiniMapView(self.canvas, self.canvas)
+        self.minimap.viewport_move_requested.connect(self._on_minimap_move)
+        self.canvas.viewport_changed.connect(self.minimap.update_viewport_rect)
+        
+        # Position minimap in bottom-left corner
+        self.minimap.setParent(self.canvas)
+        self.minimap.move(10, self.canvas.height() - self.minimap.height() - 10)
+        self.minimap.raise_()  # Bring to front
+        self.minimap.show()
+        
+        # Install event filter to reposition minimap on resize
+        self.canvas.installEventFilter(self)
     
     def set_jack_manager(self, jack_manager: Optional[JackClientManager]):
         """Set JACK manager and populate canvas."""
@@ -433,9 +533,23 @@ class NodeCanvasWidget(QWidget):
         if jack_manager:
             self._refresh_canvas()
     
+    def eventFilter(self, obj, event):
+        """Handle canvas resize to reposition minimap."""
+        if obj == self.canvas and event.type() == event.Type.Resize:
+            # Reposition minimap in bottom-left corner
+            self.minimap.move(10, self.canvas.height() - self.minimap.height() - 10)
+        return super().eventFilter(obj, event)
+    
+    def _on_minimap_move(self, scene_pos: QPointF):
+        """Handle minimap viewport drag."""
+        # Center main view on the requested scene position
+        self.canvas.centerOn(scene_pos)
+        self.minimap.update_viewport_rect()
+    
     def _refresh_canvas(self):
         """Refresh canvas from JACK state."""
         if not self.jack_manager or not self.jack_manager.is_connected():
+            logger.debug("Cannot refresh canvas: JACK not connected")
             return
         
         # Store current node positions
@@ -448,6 +562,7 @@ class NodeCanvasWidget(QWidget):
         try:
             output_ports = self.jack_manager.get_ports(is_output=True, is_audio=True)
             input_ports = self.jack_manager.get_ports(is_input=True, is_audio=True)
+            logger.debug(f"Found {len(output_ports)} output ports and {len(input_ports)} input ports")
         except Exception as e:
             logger.error(f"Failed to get JACK ports: {e}")
             return
@@ -483,6 +598,10 @@ class NodeCanvasWidget(QWidget):
                     self.canvas.add_connection(output_port, input_port)
         except Exception as e:
             logger.error(f"Failed to get JACK connections: {e}")
+        
+        # Update minimap
+        self.minimap.fitInView(self.canvas.scene.sceneRect(), Qt.KeepAspectRatio)
+        self.minimap.update_viewport_rect()
     
     def _auto_refresh(self):
         """Auto-refresh if enabled."""
@@ -506,6 +625,7 @@ class NodeCanvasWidget(QWidget):
     def _fit_all(self):
         """Fit all nodes in view."""
         self.canvas.fitInView(self.canvas.scene.itemsBoundingRect(), Qt.KeepAspectRatio)
+        self.minimap.update_viewport_rect()
     
     def _on_connection_requested(self, output_port: str, input_port: str):
         """Handle connection request."""
@@ -513,7 +633,7 @@ class NodeCanvasWidget(QWidget):
             return
         
         try:
-            self.jack_manager.connect(output_port, input_port)
+            self.jack_manager.connect_ports(output_port, input_port)
             self.canvas.add_connection(output_port, input_port)
             logger.info(f"Connected {output_port} -> {input_port}")
         except Exception as e:
@@ -526,7 +646,7 @@ class NodeCanvasWidget(QWidget):
             return
         
         try:
-            self.jack_manager.disconnect(output_port, input_port)
+            self.jack_manager.disconnect_ports(output_port, input_port)
             self.canvas.remove_connection(output_port, input_port)
             logger.info(f"Disconnected {output_port} -> {input_port}")
         except Exception as e:
@@ -642,7 +762,7 @@ class NodeCanvasWidget(QWidget):
                         continue
                     
                     # Try to connect
-                    self.jack_manager.connect(output_port, input_port)
+                    self.jack_manager.connect_ports(output_port, input_port)
                     self.canvas.add_connection(output_port, input_port)
                     success_count += 1
                     
