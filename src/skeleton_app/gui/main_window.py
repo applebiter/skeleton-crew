@@ -22,7 +22,7 @@ from skeleton_app.gui.widgets.patchbay_widget import PatchbayWidget
 from skeleton_app.gui.widgets.node_canvas import NodeCanvasWidget
 from skeleton_app.gui.widgets.video_panel import VideoPanel
 from skeleton_app.audio.jack_client import JackClientManager
-from skeleton_app.audio.xjadeo_manager import XjadeoManager
+from skeleton_app.audio.qt_video_player import QtVideoPlayerManager
 
 
 class MainWindow(QMainWindow):
@@ -47,8 +47,8 @@ class MainWindow(QMainWindow):
         # JACK client manager
         self.jack_manager: Optional[JackClientManager] = None
         
-        # xjadeo manager
-        self.xjadeo_manager = XjadeoManager()
+        # Qt video player manager
+        self.video_manager = QtVideoPlayerManager()
         
         # Database and service discovery
         self.database: Optional[Database] = None
@@ -186,7 +186,7 @@ class MainWindow(QMainWindow):
         
         # Video players dock
         self.video_dock = QDockWidget("Video Players", self)
-        self.video_panel = VideoPanel(self.xjadeo_manager, self)
+        self.video_panel = VideoPanel(self.video_manager, self)
         self.video_dock.setWidget(self.video_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.video_dock)
         
@@ -256,6 +256,9 @@ class MainWindow(QMainWindow):
         
         # Update transport panel
         self.transport_panel.set_jack_manager(self.jack_manager)
+        
+        # Update video player manager
+        self.video_manager.set_jack_manager(self.jack_manager)
     
     def _on_jack_disconnected(self):
         """Handle JACK disconnection."""
@@ -360,8 +363,8 @@ class MainWindow(QMainWindow):
                 pass
         
         # Stop all video players
-        if self.xjadeo_manager:
-            self.xjadeo_manager.stop_all()
+        if self.video_manager:
+            self.video_manager.cleanup_all()
         
         # Disconnect from JACK
         if self.jack_manager:

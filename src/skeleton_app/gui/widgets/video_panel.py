@@ -1,7 +1,7 @@
 """
 Video player management panel.
 
-Shows active xjadeo instances and allows control.
+Shows active Qt video players and allows control.
 """
 
 import logging
@@ -10,11 +10,11 @@ from typing import Optional
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
-    QPushButton, QLabel, QFileDialog, QMessageBox, QGroupBox
+    QPushButton, QLabel, QFileDialog, QMessageBox, QGroupBox, QDialog
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 
-from skeleton_app.audio.xjadeo_manager import XjadeoManager
+from skeleton_app.audio.qt_video_player import QtVideoPlayerManager, QtVideoPlayer
 
 logger = logging.getLogger(__name__)
 
@@ -23,16 +23,16 @@ class VideoPanel(QWidget):
     """
     Video player management panel.
     
-    Shows active xjadeo instances and provides controls.
+    Shows active Qt video players and provides controls.
     """
     
     # Signals
     video_opened = Signal(str, str)  # instance_id, file_path
     video_closed = Signal(str)  # instance_id
     
-    def __init__(self, xjadeo_manager: XjadeoManager, parent: Optional[QWidget] = None):
+    def __init__(self, video_manager: QtVideoPlayerManager, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.xjadeo_manager = xjadeo_manager
+        self.video_manager = video_manager
         self._setup_ui()
         
         # Auto-refresh timer
@@ -60,10 +60,11 @@ class VideoPanel(QWidget):
         
         # Instance tree
         self.instance_tree = QTreeWidget()
-        self.instance_tree.setHeaderLabels(["Instance", "File", "Status"])
-        self.instance_tree.setColumnWidth(0, 120)
-        self.instance_tree.setColumnWidth(1, 300)
-        self.instance_tree.setColumnWidth(2, 100)
+        self.instance_tree.setHeaderLabels(["Instance", "File", "Status", "Sync"])
+        self.instance_tree.setColumnWidth(0, 100)
+        self.instance_tree.setColumnWidth(1, 250)
+        self.instance_tree.setColumnWidth(2, 80)
+        self.instance_tree.setColumnWidth(3, 100)
         layout.addWidget(self.instance_tree)
         
         # Control buttons
@@ -89,9 +90,10 @@ class VideoPanel(QWidget):
         info_box = QGroupBox("Info")
         info_layout = QVBoxLayout()
         info_label = QLabel(
-            "xjadeo video players sync to JACK transport.\n"
+            "Qt Multimedia video players sync to JACK transport.\n"
             "Open multiple videos for multi-monitor setups.\n"
-            "All instances follow the same timeline."
+            "All instances follow the same timeline.\n"
+            "Circular buffer ensures smooth, frame-accurate sync."
         )
         info_label.setWordWrap(True)
         info_layout.addWidget(info_label)
@@ -107,24 +109,39 @@ class VideoPanel(QWidget):
             self,
             "Open Video File",
             str(Path.home()),
-            "Video Files (*.mp4 *.avi *.mov *.mkv *.webm *.ogv);;All Files (*)"
+            "Video Files (*.mp4 *.avi *.mov *.mkv *.webm *.ogv *.flv *.wmv);;All Files (*)"
         )
         
         if not file_path:
             return
         
         try:
-            # Generate instance ID
-            instance_id = f"video_{len(self.xjadeo_manager.instances) + 1}"
-            
-            # Launch xjadeo
-            self.xjadeo_manager.launch(
+            # Create player with video file
+            instance_id, player = self.video_manager.create_player(
                 file_path=Path(file_path),
-                instance_id=instance_id,
-                sync_to_jack=True,
-                show_osd=True,
-                show_timecode=True
+                sync_enabled=True
             )
+            
+            # Create video widget window
+            video_window = QDialog(self)
+            video_window.setWindowTitle(f"{Path(file_path).name} - {instance_id}")
+            video_window.setMinimumSize(800, 600)
+            
+            layout = QVBoxLayout()
+            video_widget = player.create_video_widget(video_window)
+            layout.addWidget(video_widget)
+            video_window.setLayout(layout)
+            
+            # Show window
+            video_window.show()
+            
+            # Store reference to keep window alive
+            if not hasattr(self, '_video_windows'):
+                self._video_windows = {}
+            self._video_windows[instance_id] = video_window
+            
+            # Connect cleanup
+            video_window.finished.connect(lambda: self._on_window_closed(instance_id))
             
             logger.info(f"Opened video: {file_path} (instance: {instance_id})")
             self.video_opened.emit(instance_id, file_path)
@@ -138,6 +155,14 @@ class VideoPanel(QWidget):
                 f"Failed to open video:\n{str(e)}"
             )
     
+    def _on_window_closed(self, instance_id: str):
+        """Handle video window close."""
+        if hasattr(self, '_video_windows'):
+            self._video_windows.pop(instance_id, None)
+        self.video_manager.remove_player(instance_id)
+        self.video_closed.emit(instance_id)
+        self._refresh_instances()
+    
     def _on_stop_selected(self):
         """Stop selected video instance."""
         selected_items = self.instance_tree.selectedItems()
@@ -147,7 +172,13 @@ class VideoPanel(QWidget):
         for item in selected_items:
             instance_id = item.text(0)
             try:
-                self.xjadeo_manager.stop(instance_id)
+                # Close window if exists
+                if hasattr(self, '_video_windows'):
+                    window = self._video_windows.pop(instance_id, None)
+                    if window:
+                        window.close()
+                
+                self.video_manager.remove_player(instance_id)
                 logger.info(f"Stopped video instance: {instance_id}")
                 self.video_closed.emit(instance_id)
             except Exception as e:
@@ -158,10 +189,18 @@ class VideoPanel(QWidget):
     def _on_stop_all(self):
         """Stop all video instances."""
         try:
-            self.xjadeo_manager.stop_all()
-            logger.info("Stopped all video instances")
-            for instance_id in list(self.xjadeo_manager.instances.keys()):
+            # Close all windows
+            if hasattr(self, '_video_windows'):
+                for window in list(self._video_windows.values()):
+                    window.close()
+                self._video_windows.clear()
+            
+            # Cleanup all players
+            for instance_id in list(self.video_manager.get_all_players().keys()):
+                self.video_manager.remove_player(instance_id)
                 self.video_closed.emit(instance_id)
+            
+            logger.info("Stopped all video instances")
             self._refresh_instances()
         except Exception as e:
             logger.error(f"Failed to stop all instances: {e}")
@@ -170,19 +209,39 @@ class VideoPanel(QWidget):
         """Refresh the instance list."""
         self.instance_tree.clear()
         
-        instances = self.xjadeo_manager.get_instances()
-        for instance_id in instances:
-            info = self.xjadeo_manager.get_instance_info(instance_id)
-            if info:
-                file_path = Path(info["file_path"])
-                item = QTreeWidgetItem([
-                    instance_id,
-                    file_path.name,
-                    "Running" if info["running"] else "Stopped"
-                ])
-                self.instance_tree.addTopLevelItem(item)
+        players = self.video_manager.get_all_players()
+        for instance_id, player in players.items():
+            # Get player state
+            state = "Playing" if player.player.playbackState() == player.player.PlayingState else \
+                    "Paused" if player.player.playbackState() == player.player.PausedState else "Stopped"
+            
+            # Get sync state
+            stats = player.get_sync_stats()
+            sync_text = f"{stats.state.value} ({stats.drift_ms:.1f}ms)"
+            
+            # Get file name
+            file_name = player.file_path.name if player.file_path else "No file"
+            
+            item = QTreeWidgetItem([
+                instance_id,
+                file_name,
+                state,
+                sync_text
+            ])
+            
+            # Color code sync state
+            if stats.state.value == "synced":
+                item.setForeground(3, Qt.green)
+            elif stats.state.value == "syncing":
+                item.setForeground(3, Qt.yellow)
+            elif stats.state.value == "drift":
+                item.setForeground(3, Qt.yellow)
+            else:
+                item.setForeground(3, Qt.red)
+            
+            self.instance_tree.addTopLevelItem(item)
         
         # Update button states
-        has_instances = len(instances) > 0
+        has_instances = len(players) > 0
         self.stop_button.setEnabled(has_instances)
         self.stop_all_button.setEnabled(has_instances)
