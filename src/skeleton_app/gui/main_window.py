@@ -161,6 +161,8 @@ class MainWindow(QMainWindow):
         
         # Tab widget for main content
         self.tabs = QTabWidget()
+        self.tabs.setTabsClosable(True)
+        self.tabs.tabCloseRequested.connect(self._on_tab_close_requested)
         
         # Node Canvas tab (visual graph)
         self.node_canvas = NodeCanvasWidget(self)
@@ -169,6 +171,10 @@ class MainWindow(QMainWindow):
         # Patchbay tab (list view)
         self.patchbay = PatchbayWidget(self)
         self.tabs.addTab(self.patchbay, "Patchbay List")
+        
+        # Prevent closing of system tabs (Node Canvas, Patchbay)
+        self.tabs.tabBar().setTabButton(0, self.tabs.tabBar().RightSide, None)
+        self.tabs.tabBar().setTabButton(1, self.tabs.tabBar().RightSide, None)
         
         # TODO: Add more tabs (Media Library, Playlist, etc.)
         
@@ -184,9 +190,9 @@ class MainWindow(QMainWindow):
         self.cluster_dock.setWidget(self.cluster_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.cluster_dock)
         
-        # Video players dock
+        # Video players dock (pass main tab widget)
         self.video_dock = QDockWidget("Video Players", self)
-        self.video_panel = VideoPanel(self.video_manager, self)
+        self.video_panel = VideoPanel(self.video_manager, self.tabs, self)
         self.video_dock.setWidget(self.video_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.video_dock)
         
