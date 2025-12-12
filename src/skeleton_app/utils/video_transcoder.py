@@ -250,7 +250,8 @@ class VideoTranscoder:
         job: TranscodeJob,
         media_info: MediaInfo,
         progress_callback=None
-    ):with NVIDIA NVENC hardware acceleration."""
+    ):
+        """Transcode video stream with NVIDIA NVENC hardware acceleration."""
         cmd = ['ffmpeg']
         
         # Hardware-accelerated decoding
