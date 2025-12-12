@@ -86,6 +86,33 @@ class VideoTranscoder:
         self.use_hw_accel = use_hw_accel
         self._check_nvenc_support()
     
+    def _check_nvenc_support(self) -> bool:
+        """Check if NVENC is available."""
+        if not self.use_hw_accel:
+            return False
+        
+        try:
+            result = subprocess.run(
+                ['ffmpeg', '-hide_banner', '-encoders'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            has_nvenc = 'h264_nvenc' in result.stdout
+            if has_nvenc:
+                logger.info("NVIDIA NVENC hardware encoder detected")
+            else:
+                logger.warning("NVENC not available, falling back to CPU encoding")
+                self.use_hw_accel = False
+            
+            return has_nvenc
+        
+        except Exception as e:
+            logger.warning(f"Failed to check NVENC support: {e}")
+            self.use_hw_accel = False
+            return False
+    
     def probe_media(self, file_path: Path) -> MediaInfo:
         """Get media file information using ffprobe."""
         try:
