@@ -581,8 +581,8 @@ class NodeCanvasWidget(QWidget):
             
             # Special case: split "system" into two nodes
             if client_name == "system" and has_outputs and has_inputs:
-                # Create output node (capture ports)
-                out_node_name = "system (out)"
+                # Create source node (capture ports - hardware inputs become JACK outputs)
+                out_node_name = "system (capture)"
                 x_out, y_out = old_positions.get(out_node_name, (None, None))
                 out_node = self.canvas.add_node(out_node_name, x_out, y_out)
                 
@@ -593,8 +593,8 @@ class NodeCanvasWidget(QWidget):
                         # Update full name to match actual JACK port
                         port_item.full_name = f"{client_name}:{port_name}"
                 
-                # Create input node (playback ports)
-                in_node_name = "system (in)"
+                # Create sink node (playback ports - hardware outputs become JACK inputs)
+                in_node_name = "system (playback)"
                 x_in, y_in = old_positions.get(in_node_name, (None, None))
                 in_node = self.canvas.add_node(in_node_name, x_in, y_in)
                 
