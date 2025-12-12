@@ -407,13 +407,20 @@ class VideoPlayerWidget(QWidget):
     @Slot(int)
     def _on_position_changed(self, position_ms: int):
         """Handle position change from player."""
-        # Update time label
-        duration_ms = self.player.get_duration_ms()
+        if not self.player:
+            return
         
-        position_str = self._format_time(position_ms)
-        duration_str = self._format_time(duration_ms)
-        
-        self.time_label.setText(f"{position_str} / {duration_str}")
+        try:
+            # Update time label
+            duration_ms = self.player.get_duration_ms()
+            
+            position_str = self._format_time(position_ms)
+            duration_str = self._format_time(duration_ms)
+            
+            self.time_label.setText(f"{position_str} / {duration_str}")
+        except (RuntimeError, AttributeError):
+            # Player was deleted or is None
+            pass
     
     @Slot(int)
     def _on_duration_changed(self, duration_ms: int):
