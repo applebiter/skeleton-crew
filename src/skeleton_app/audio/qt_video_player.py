@@ -314,53 +314,55 @@ class QtVideoPlayer(QObject):
     
     def _sync_to_jack(self):
         """
-        Synchronize video to JACK transport.
+        Synchronize video to JACK transport timebase (xjadeo-style).
         
-        This responds to JACK transport state changes (play/stop) and seeks,
-        but does NOT do continuous position correction (which causes stuttering).
+        When enabled, video position is continuously driven by JACK transport
+        position, frame-by-frame. This provides true timebase sync but requires
+        more CPU overhead.
         """
         if not self.jack_manager or not self.jack_manager.is_connected():
             return
         
         try:
-            # Get JACK transport state
+            # Get JACK transport state and position
             jack_state = self.jack_manager.get_transport_state()
-            
-            # Respond to transport state changes
-            if jack_state == "Stopped":
-                # If JACK stopped, pause video
-                if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
-                    self.pause()
-                    logger.debug(f"[{self.instance_id}] JACK stopped, pausing video")
-            elif jack_state == "Rolling":
-                # If JACK playing, play video
-                if self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
-                    self.play()
-                    logger.debug(f"[{self.instance_id}] JACK rolling, playing video")
-            
-            # Get JACK position
             jack_frame = self.jack_manager.get_transport_frame()
             jack_position_ms = int((jack_frame / self.sample_rate) * 1000)
             
-            # Get video position
-            video_position_ms = self.player.position()
+            # Pause video when JACK stops
+            if jack_state == "Stopped":
+                if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                    self.pause()
+                    logger.debug(f"[{self.instance_id}] JACK stopped, pausing video")
+                # Still seek to match position when stopped (for scrubbing)
+                video_position_ms = self.player.position()
+                if abs(jack_position_ms - video_position_ms) > 100:  # 100ms threshold
+                    self.player.setPosition(jack_position_ms)
+                return
             
-            # Calculate drift (just for display, don't correct continuously)
-            drift_ms = jack_position_ms - video_position_ms
-            self.sync_stats.drift_ms = drift_ms
-            
-            # Update sync state for display
-            if abs(drift_ms) > 500:  # 500ms
-                self.sync_stats.state = SyncState.DRIFT
-            else:
-                self.sync_stats.state = SyncState.SYNCED
-            
-            # Only seek if drift is HUGE (user probably seeked JACK transport)
-            # This catches explicit seeks but avoids constant correction
-            if abs(drift_ms) > 2000:  # 2 seconds - clearly a deliberate seek
-                logger.info(f"[{self.instance_id}] Large drift detected ({drift_ms}ms), seeking to match JACK")
-                self.player.setPosition(jack_position_ms)
-                self.sync_stats.corrections += 1
+            # When JACK is rolling, continuously sync position (timebase mode)
+            if jack_state == "Rolling":
+                video_position_ms = self.player.position()
+                drift_ms = jack_position_ms - video_position_ms
+                self.sync_stats.drift_ms = drift_ms
+                
+                # Seek if video drifts from JACK position
+                # Use small threshold (100ms) for tight sync like xjadeo
+                if abs(drift_ms) > 100:
+                    self.player.setPosition(jack_position_ms)
+                    self.sync_stats.corrections += 1
+                    
+                    # Update sync state
+                    if abs(drift_ms) > 500:
+                        self.sync_stats.state = SyncState.DRIFT
+                    else:
+                        self.sync_stats.state = SyncState.SYNCING
+                else:
+                    self.sync_stats.state = SyncState.SYNCED
+                
+                # Ensure video is playing
+                if self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+                    self.play()
             
             # Emit stats for UI
             self.sync_stats_changed.emit(self.sync_stats)
