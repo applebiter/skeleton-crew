@@ -202,6 +202,27 @@ class MainWindow(QMainWindow):
         self.view_video_action.toggled.connect(self.video_dock.setVisible)
         self.video_dock.visibilityChanged.connect(self.view_video_action.setChecked)
     
+    def _open_video(self):
+        """Handle open video action (delegates to video panel)."""
+        self.video_panel._on_open_video()
+    
+    def _on_tab_close_requested(self, index: int):
+        """Handle tab close request."""
+        # Don't allow closing system tabs (first two: Node Canvas, Patchbay)
+        if index < 2:
+            return
+        
+        # Get the widget at this index
+        widget = self.tabs.widget(index)
+        
+        # If it's a video player widget, trigger its close
+        from skeleton_app.gui.widgets.video_player_widget import VideoPlayerWidget
+        if isinstance(widget, VideoPlayerWidget):
+            widget.closed.emit(widget.player.instance_id)
+        else:
+            # For other tabs, just remove
+            self.tabs.removeTab(index)
+    
     def _create_status_bar(self):
         """Create status bar."""
         self.status_bar = QStatusBar()
