@@ -268,11 +268,11 @@ class QtVideoPlayer(QObject):
         """Handle playback state change."""
         state = self.player.playbackState()
         
-        if state == QMediaPlayer.PlayingState:
+        if state == QMediaPlayer.PlaybackState.PlayingState:
             state_str = "playing"
             if self.sync_enabled:
                 self.sync_timer.start(self.sync_interval_ms)
-        elif state == QMediaPlayer.PausedState:
+        elif state == QMediaPlayer.PlaybackState.PausedState:
             state_str = "paused"
             self.sync_timer.stop()
         else:
@@ -299,13 +299,13 @@ class QtVideoPlayer(QObject):
         
         # If JACK is stopped, pause video
         if jack_state == "Stopped":
-            if self.player.playbackState() == QMediaPlayer.PlayingState:
+            if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
                 self.pause()
             return
         
         # If JACK is playing, ensure video is playing
         if jack_state == "Rolling":
-            if self.player.playbackState() != QMediaPlayer.PlayingState:
+            if self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
                 self.play()
         
         # Get JACK frame position

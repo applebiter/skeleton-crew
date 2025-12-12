@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QFileDialog, QMessageBox, QGroupBox, QDialog
 )
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtMultimedia import QMediaPlayer
 
 from skeleton_app.audio.qt_video_player import QtVideoPlayerManager, QtVideoPlayer
 
@@ -212,8 +213,13 @@ class VideoPanel(QWidget):
         players = self.video_manager.get_all_players()
         for instance_id, player in players.items():
             # Get player state
-            state = "Playing" if player.player.playbackState() == player.player.PlayingState else \
-                    "Paused" if player.player.playbackState() == player.player.PausedState else "Stopped"
+            playback_state = player.player.playbackState()
+            if playback_state == QMediaPlayer.PlaybackState.PlayingState:
+                state = "Playing"
+            elif playback_state == QMediaPlayer.PlaybackState.PausedState:
+                state = "Paused"
+            else:
+                state = "Stopped"
             
             # Get sync state
             stats = player.get_sync_stats()
