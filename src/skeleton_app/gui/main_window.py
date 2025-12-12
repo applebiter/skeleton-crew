@@ -21,6 +21,7 @@ from skeleton_app.gui.widgets.cluster_panel import ClusterPanel
 from skeleton_app.gui.widgets.patchbay_widget import PatchbayWidget
 from skeleton_app.gui.widgets.node_canvas import NodeCanvasWidget
 from skeleton_app.gui.widgets.video_panel import VideoPanel
+from skeleton_app.gui.widgets.transcode_panel import TranscodePanel
 from skeleton_app.audio.jack_client import JackClientManager
 from skeleton_app.audio.qt_video_player import QtVideoPlayerManager
 
@@ -112,6 +113,10 @@ class MainWindow(QMainWindow):
         self.view_video_action.setCheckable(True)
         self.view_video_action.setChecked(True)
         
+        self.view_transcode_action = QAction("&Transcode Videos", self)
+        self.view_transcode_action.setCheckable(True)
+        self.view_transcode_action.setChecked(False)
+        
         # Help menu actions
         self.about_action = QAction("&About", self)
         self.about_action.triggered.connect(self._show_about)
@@ -136,6 +141,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.view_patchbay_action)
         view_menu.addAction(self.view_cluster_action)
         view_menu.addAction(self.view_video_action)
+        view_menu.addAction(self.view_transcode_action)
         
         # Help menu
         help_menu = menubar.addMenu("&Help")
@@ -197,11 +203,20 @@ class MainWindow(QMainWindow):
         self.video_dock.setWidget(self.video_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.video_dock)
         
+        # Transcode dock (initially hidden)
+        self.transcode_dock = QDockWidget("Transcode Videos", self)
+        self.transcode_panel = TranscodePanel(self)
+        self.transcode_dock.setWidget(self.transcode_panel)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.transcode_dock)
+        self.transcode_dock.setVisible(False)
+        
         # Connect view actions
         self.view_cluster_action.toggled.connect(self.cluster_dock.setVisible)
         self.cluster_dock.visibilityChanged.connect(self.view_cluster_action.setChecked)
         self.view_video_action.toggled.connect(self.video_dock.setVisible)
         self.video_dock.visibilityChanged.connect(self.view_video_action.setChecked)
+        self.view_transcode_action.toggled.connect(self.transcode_dock.setVisible)
+        self.transcode_dock.visibilityChanged.connect(self.view_transcode_action.setChecked)
     
     def _open_video(self):
         """Handle open video action (delegates to video panel)."""
