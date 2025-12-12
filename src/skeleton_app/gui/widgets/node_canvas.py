@@ -2,23 +2,30 @@
 Node canvas widget - visual graph representation of JACK connections.
 
 Similar to Carla's patchbay canvas but extensible for custom node types.
+Supports saving/loading connection presets.
 """
 
+import json
+import logging
 from typing import Optional, Dict, List, Set, Tuple
 from enum import Enum
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGraphicsView, QGraphicsScene,
     QGraphicsItem, QGraphicsRectItem, QGraphicsTextItem, QGraphicsLineItem,
-    QGraphicsEllipseItem, QPushButton, QComboBox, QLabel, QToolBar
+    QGraphicsEllipseItem, QPushButton, QComboBox, QLabel, QToolBar,
+    QInputDialog, QMessageBox, QFileDialog
 )
 from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, Signal, QLineF
 from PySide6.QtGui import (
     QPen, QBrush, QColor, QPainter, QPainterPath,
-    QLinearGradient, QFont
+    QLinearGradient, QFont, QAction
 )
 
 from skeleton_app.audio.jack_client import JackClientManager
+
+logger = logging.getLogger(__name__)
 
 
 class PortType(Enum):
@@ -30,24 +37,33 @@ class PortType(Enum):
 
 
 class PortItem(QGraphicsEllipseItem):
-    """Visual representation of a port."""
+    """Visual representation of a port (connection point)."""
     
-    def __init__(self, port_name: str, port_type: PortType, parent=None):
+    def __init__(self, port_name: str, port_type: PortType, parent: QGraphicsItem):
         super().__init__(-6, -6, 12, 12, parent)
         self.port_name = port_name
         self.port_type = port_type
+        self.full_name = ""  # Set by parent node
         
-        # Style based on type
+        # Color by type
         if port_type == PortType.AUDIO_OUTPUT:
             self.setBrush(QBrush(QColor(60, 180, 60)))  # Green
         elif port_type == PortType.AUDIO_INPUT:
             self.setBrush(QBrush(QColor(60, 60, 180)))  # Blue
+        elif port_type == PortType.MIDI_OUTPUT:
+            self.setBrush(QBrush(QColor(180, 60, 180)))  # Magenta
+        elif port_type == PortType.MIDI_INPUT:
+            self.setBrush(QBrush(QColor(180, 180, 60)))  # Yellow
         
         self.setPen(QPen(QColor(0, 0, 0), 2))
         self.setAcceptHoverEvents(True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable)
         
         # Connection tracking
         self.connections: List['ConnectionItem'] = []
+        
+        # Drag state for creating connections
+        self._drag_line: Optional[QGraphicsLineItem] = None
     
     def hoverEnterEvent(self, event):
         """Highlight on hover."""
@@ -60,7 +76,49 @@ class PortItem(QGraphicsEllipseItem):
             self.setBrush(QBrush(QColor(60, 180, 60)))
         elif self.port_type == PortType.AUDIO_INPUT:
             self.setBrush(QBrush(QColor(60, 60, 180)))
+        elif self.port_type == PortType.MIDI_OUTPUT:
+            self.setBrush(QBrush(QColor(180, 60, 180)))
+        elif self.port_type == PortType.MIDI_INPUT:
+            self.setBrush(QBrush(QColor(180, 180, 60)))
         super().hoverLeaveEvent(event)
+    
+    def mousePressEvent(self, event):
+        """Start dragging connection."""
+        if event.button() == Qt.LeftButton and self.port_type in (PortType.AUDIO_OUTPUT, PortType.MIDI_OUTPUT):
+            # Start drag from output port
+            start = self.sceneBoundingRect().center()
+            self._drag_line = QGraphicsLineItem(QLineF(start, start))
+            self._drag_line.setPen(QPen(QColor(255, 255, 100), 2, Qt.DashLine))
+            self.scene().addItem(self._drag_line)
+        super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """Update drag line."""
+        if self._drag_line:
+            start = self.sceneBoundingRect().center()
+            end = event.scenePos()
+            self._drag_line.setLine(QLineF(start, end))
+        super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """Complete connection."""
+        if self._drag_line:
+            # Find target port
+            target_item = self.scene().itemAt(event.scenePos(), self.scene().views()[0].transform())
+            if isinstance(target_item, PortItem):
+                # Check if valid connection (output -> input, same type)
+                if (self.port_type == PortType.AUDIO_OUTPUT and target_item.port_type == PortType.AUDIO_INPUT) or \
+                   (self.port_type == PortType.MIDI_OUTPUT and target_item.port_type == PortType.MIDI_INPUT):
+                    # Emit connection request
+                    canvas = self.scene().views()[0]
+                    if hasattr(canvas, 'connection_requested'):
+                        canvas.connection_requested.emit(self.full_name, target_item.full_name)
+            
+            # Remove drag line
+            self.scene().removeItem(self._drag_line)
+            self._drag_line = None
+        
+        super().mouseReleaseEvent(event)
 
 
 class NodeItem(QGraphicsRectItem):
@@ -76,6 +134,7 @@ class NodeItem(QGraphicsRectItem):
         self.setPen(QPen(QColor(200, 200, 200), 2))
         self.setFlag(QGraphicsItem.ItemIsMovable)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
         
         # Title
         self.title = QGraphicsTextItem(client_name, self)
@@ -88,18 +147,20 @@ class NodeItem(QGraphicsRectItem):
         self.input_ports: List[PortItem] = []
         self.output_ports: List[PortItem] = []
     
-    def add_input_port(self, port_name: str, port_type: PortType = PortType.AUDIO_INPUT):
+    def add_input_port(self, port_name: str, port_type: PortType = PortType.AUDIO_INPUT) -> PortItem:
         """Add an input port to the left side."""
         port = PortItem(port_name, port_type, self)
+        port.full_name = f"{self.client_name}:{port_name}"
         y_offset = 30 + len(self.input_ports) * 20
         port.setPos(0, y_offset)
         self.input_ports.append(port)
         self._resize_to_fit_ports()
         return port
     
-    def add_output_port(self, port_name: str, port_type: PortType = PortType.AUDIO_OUTPUT):
+    def add_output_port(self, port_name: str, port_type: PortType = PortType.AUDIO_OUTPUT) -> PortItem:
         """Add an output port to the right side."""
         port = PortItem(port_name, port_type, self)
+        port.full_name = f"{self.client_name}:{port_name}"
         y_offset = 30 + len(self.output_ports) * 20
         port.setPos(self.rect().width(), y_offset)
         self.output_ports.append(port)
@@ -115,6 +176,14 @@ class NodeItem(QGraphicsRectItem):
         # Reposition output ports to right edge
         for i, port in enumerate(self.output_ports):
             port.setPos(self.rect().width(), 30 + i * 20)
+    
+    def itemChange(self, change, value):
+        """Update connections when node moves."""
+        if change == QGraphicsItem.ItemPositionHasChanged:
+            for port in self.input_ports + self.output_ports:
+                for connection in port.connections:
+                    connection.update_position()
+        return super().itemChange(change, value)
 
 
 class ConnectionItem(QGraphicsLineItem):
@@ -140,6 +209,17 @@ class ConnectionItem(QGraphicsLineItem):
         start = self.output_port.sceneBoundingRect().center()
         end = self.input_port.sceneBoundingRect().center()
         self.setLine(QLineF(start, end))
+    
+    def mousePressEvent(self, event):
+        """Handle disconnection on right-click."""
+        if event.button() == Qt.RightButton:
+            canvas = self.scene().views()[0]
+            if hasattr(canvas, 'disconnection_requested'):
+                canvas.disconnection_requested.emit(
+                    self.output_port.full_name,
+                    self.input_port.full_name
+                )
+        super().mousePressEvent(event)
 
 
 class NodeCanvas(QGraphicsView):
@@ -151,6 +231,7 @@ class NodeCanvas(QGraphicsView):
     
     # Signals
     connection_requested = Signal(str, str)  # output_port, input_port
+    disconnection_requested = Signal(str, str)  # output_port, input_port
     
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -202,9 +283,28 @@ class NodeCanvas(QGraphicsView):
         input_port = self._find_port(input_port_name, is_output=False)
         
         if output_port and input_port:
+            # Check if connection already exists
+            for conn in self.connections:
+                if conn.output_port == output_port and conn.input_port == input_port:
+                    return  # Already connected
+            
             connection = ConnectionItem(output_port, input_port)
             self.scene.addItem(connection)
             self.connections.append(connection)
+    
+    def remove_connection(self, output_port_name: str, input_port_name: str):
+        """Remove a visual connection."""
+        output_port = self._find_port(output_port_name, is_output=True)
+        input_port = self._find_port(input_port_name, is_output=False)
+        
+        if output_port and input_port:
+            for conn in self.connections[:]:
+                if conn.output_port == output_port and conn.input_port == input_port:
+                    output_port.connections.remove(conn)
+                    input_port.connections.remove(conn)
+                    self.scene.removeItem(conn)
+                    self.connections.remove(conn)
+                    break
     
     def _find_port(self, port_name: str, is_output: bool) -> Optional[PortItem]:
         """Find a port by its full name."""
@@ -212,7 +312,7 @@ class NodeCanvas(QGraphicsView):
             return None
         
         client_name = port_name.split(':')[0]
-        port_short_name = port_name.split(':')[1]
+        port_short_name = ':'.join(port_name.split(':')[1:])
         
         node = self.nodes.get(client_name)
         if not node:
@@ -220,7 +320,7 @@ class NodeCanvas(QGraphicsView):
         
         ports = node.output_ports if is_output else node.input_ports
         for port in ports:
-            if port_short_name in port.port_name:
+            if port.port_name == port_short_name:
                 return port
         
         return None
@@ -240,18 +340,35 @@ class NodeCanvas(QGraphicsView):
             self.scale(zoom_factor, zoom_factor)
         else:
             self.scale(1 / zoom_factor, 1 / zoom_factor)
+    
+    def get_node_positions(self) -> Dict[str, Tuple[float, float]]:
+        """Get positions of all nodes."""
+        return {name: (node.pos().x(), node.pos().y()) for name, node in self.nodes.items()}
+    
+    def set_node_positions(self, positions: Dict[str, Tuple[float, float]]):
+        """Set positions of nodes."""
+        for name, (x, y) in positions.items():
+            if name in self.nodes:
+                self.nodes[name].setPos(x, y)
 
 
 class NodeCanvasWidget(QWidget):
     """
-    Node canvas widget with toolbar.
+    Node canvas widget with toolbar and preset management.
     """
     
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.jack_manager: Optional[JackClientManager] = None
+        self.presets_dir = Path.home() / ".config" / "skeleton-app" / "jack-presets"
+        self.presets_dir.mkdir(parents=True, exist_ok=True)
         
         self._setup_ui()
+        
+        # Auto-refresh timer
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.timeout.connect(self._auto_refresh)
+        self.refresh_timer.start(2000)  # Refresh every 2 seconds
     
     def _setup_ui(self):
         """Setup UI."""
@@ -266,23 +383,39 @@ class NodeCanvasWidget(QWidget):
         
         toolbar.addStretch()
         
-        self.refresh_button = QPushButton("Refresh")
+        # Preset controls
+        self.preset_combo = QComboBox()
+        self.preset_combo.setMinimumWidth(150)
+        self.preset_combo.setPlaceholderText("Select preset...")
+        self._refresh_preset_list()
+        toolbar.addWidget(QLabel("Preset:"))
+        toolbar.addWidget(self.preset_combo)
+        
+        self.save_preset_button = QPushButton("💾 Save")
+        self.save_preset_button.clicked.connect(self._save_preset)
+        self.save_preset_button.setToolTip("Save current connections as preset")
+        toolbar.addWidget(self.save_preset_button)
+        
+        self.load_preset_button = QPushButton("📂 Load")
+        self.load_preset_button.clicked.connect(self._load_preset)
+        self.load_preset_button.setToolTip("Load preset connections")
+        toolbar.addWidget(self.load_preset_button)
+        
+        self.delete_preset_button = QPushButton("🗑️")
+        self.delete_preset_button.clicked.connect(self._delete_preset)
+        self.delete_preset_button.setToolTip("Delete preset")
+        toolbar.addWidget(self.delete_preset_button)
+        
+        # Canvas controls
+        self.refresh_button = QPushButton("🔄 Refresh")
         self.refresh_button.clicked.connect(self._refresh_canvas)
         toolbar.addWidget(self.refresh_button)
         
-        self.auto_arrange_button = QPushButton("Auto-Arrange")
+        self.auto_arrange_button = QPushButton("📐 Arrange")
         self.auto_arrange_button.clicked.connect(self._auto_arrange)
         toolbar.addWidget(self.auto_arrange_button)
         
-        self.zoom_in_button = QPushButton("Zoom In")
-        self.zoom_in_button.clicked.connect(lambda: self.canvas.scale(1.2, 1.2))
-        toolbar.addWidget(self.zoom_in_button)
-        
-        self.zoom_out_button = QPushButton("Zoom Out")
-        self.zoom_out_button.clicked.connect(lambda: self.canvas.scale(1/1.2, 1/1.2))
-        toolbar.addWidget(self.zoom_out_button)
-        
-        self.zoom_fit_button = QPushButton("Fit All")
+        self.zoom_fit_button = QPushButton("🔍 Fit")
         self.zoom_fit_button.clicked.connect(self._fit_all)
         toolbar.addWidget(self.zoom_fit_button)
         
@@ -290,6 +423,8 @@ class NodeCanvasWidget(QWidget):
         
         # Canvas
         self.canvas = NodeCanvas(self)
+        self.canvas.connection_requested.connect(self._on_connection_requested)
+        self.canvas.disconnection_requested.connect(self._on_disconnection_requested)
         layout.addWidget(self.canvas)
     
     def set_jack_manager(self, jack_manager: Optional[JackClientManager]):
@@ -303,12 +438,19 @@ class NodeCanvasWidget(QWidget):
         if not self.jack_manager or not self.jack_manager.is_connected():
             return
         
+        # Store current node positions
+        old_positions = self.canvas.get_node_positions()
+        
         # Clear and rebuild
         self.canvas.clear_all()
         
         # Get all ports
-        output_ports = self.jack_manager.get_ports(is_output=True, is_audio=True)
-        input_ports = self.jack_manager.get_ports(is_input=True, is_audio=True)
+        try:
+            output_ports = self.jack_manager.get_ports(is_output=True, is_audio=True)
+            input_ports = self.jack_manager.get_ports(is_input=True, is_audio=True)
+        except Exception as e:
+            logger.error(f"Failed to get JACK ports: {e}")
+            return
         
         # Create nodes for each client
         clients = set()
@@ -317,25 +459,35 @@ class NodeCanvasWidget(QWidget):
             clients.add(client_name)
         
         for client_name in sorted(clients):
-            node = self.canvas.add_node(client_name)
+            # Use old position if available
+            x, y = old_positions.get(client_name, (None, None))
+            node = self.canvas.add_node(client_name, x, y)
             
             # Add output ports
             for port in output_ports:
                 if port.startswith(client_name + ':'):
-                    port_name = port.split(':')[1]
+                    port_name = ':'.join(port.split(':')[1:])
                     node.add_output_port(port_name)
             
             # Add input ports
             for port in input_ports:
                 if port.startswith(client_name + ':'):
-                    port_name = port.split(':')[1]
+                    port_name = ':'.join(port.split(':')[1:])
                     node.add_input_port(port_name)
         
         # Add connections
-        connections = self.jack_manager.get_all_connections()
-        for output_port, input_ports in connections.items():
-            for input_port in input_ports:
-                self.canvas.add_connection(output_port, input_port)
+        try:
+            connections = self.jack_manager.get_all_connections()
+            for output_port, input_ports in connections.items():
+                for input_port in input_ports:
+                    self.canvas.add_connection(output_port, input_port)
+        except Exception as e:
+            logger.error(f"Failed to get JACK connections: {e}")
+    
+    def _auto_refresh(self):
+        """Auto-refresh if enabled."""
+        if self.jack_manager and self.jack_manager.is_connected():
+            self._refresh_canvas()
     
     def _auto_arrange(self):
         """Auto-arrange nodes in a grid."""
@@ -346,7 +498,235 @@ class NodeCanvasWidget(QWidget):
             if x > 800:
                 x = 50
                 y += 150
+        
+        # Update connections
+        for conn in self.canvas.connections:
+            conn.update_position()
     
     def _fit_all(self):
         """Fit all nodes in view."""
         self.canvas.fitInView(self.canvas.scene.itemsBoundingRect(), Qt.KeepAspectRatio)
+    
+    def _on_connection_requested(self, output_port: str, input_port: str):
+        """Handle connection request."""
+        if not self.jack_manager or not self.jack_manager.is_connected():
+            return
+        
+        try:
+            self.jack_manager.connect(output_port, input_port)
+            self.canvas.add_connection(output_port, input_port)
+            logger.info(f"Connected {output_port} -> {input_port}")
+        except Exception as e:
+            logger.error(f"Failed to connect: {e}")
+            QMessageBox.warning(self, "Connection Failed", f"Could not connect ports:\n{e}")
+    
+    def _on_disconnection_requested(self, output_port: str, input_port: str):
+        """Handle disconnection request."""
+        if not self.jack_manager or not self.jack_manager.is_connected():
+            return
+        
+        try:
+            self.jack_manager.disconnect(output_port, input_port)
+            self.canvas.remove_connection(output_port, input_port)
+            logger.info(f"Disconnected {output_port} -> {input_port}")
+        except Exception as e:
+            logger.error(f"Failed to disconnect: {e}")
+    
+    def _save_preset(self):
+        """Save current connection state as preset."""
+        if not self.jack_manager or not self.jack_manager.is_connected():
+            QMessageBox.warning(self, "Not Connected", "JACK is not connected.")
+            return
+        
+        # Ask for preset name
+        name, ok = QInputDialog.getText(self, "Save Preset", "Preset name:")
+        if not ok or not name:
+            return
+        
+        # Sanitize filename
+        filename = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).strip()
+        if not filename:
+            QMessageBox.warning(self, "Invalid Name", "Please enter a valid preset name.")
+            return
+        
+        preset_path = self.presets_dir / f"{filename}.json"
+        
+        # Gather connection data
+        try:
+            connections = self.jack_manager.get_all_connections()
+            node_positions = self.canvas.get_node_positions()
+            
+            preset_data = {
+                "name": name,
+                "connections": [
+                    {"output": out, "input": inp}
+                    for out, inputs in connections.items()
+                    for inp in inputs
+                ],
+                "node_positions": {
+                    name: {"x": x, "y": y}
+                    for name, (x, y) in node_positions.items()
+                }
+            }
+            
+            # Save to file
+            with open(preset_path, 'w') as f:
+                json.dump(preset_data, f, indent=2)
+            
+            logger.info(f"Saved preset: {preset_path}")
+            QMessageBox.information(self, "Preset Saved", f"Preset '{name}' saved successfully!")
+            self._refresh_preset_list()
+            
+        except Exception as e:
+            logger.error(f"Failed to save preset: {e}")
+            QMessageBox.critical(self, "Save Failed", f"Could not save preset:\n{e}")
+    
+    def _load_preset(self):
+        """Load preset connections."""
+        if not self.jack_manager or not self.jack_manager.is_connected():
+            QMessageBox.warning(self, "Not Connected", "JACK is not connected.")
+            return
+        
+        preset_name = self.preset_combo.currentText()
+        if not preset_name:
+            QMessageBox.warning(self, "No Preset", "Please select a preset to load.")
+            return
+        
+        # Find preset file
+        preset_files = list(self.presets_dir.glob("*.json"))
+        preset_path = None
+        for path in preset_files:
+            try:
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                    if data.get("name") == preset_name:
+                        preset_path = path
+                        break
+            except:
+                continue
+        
+        if not preset_path:
+            QMessageBox.warning(self, "Preset Not Found", f"Could not find preset '{preset_name}'.")
+            return
+        
+        try:
+            with open(preset_path, 'r') as f:
+                preset_data = json.load(f)
+            
+            # Load node positions if available
+            if "node_positions" in preset_data:
+                positions = {
+                    name: (pos["x"], pos["y"])
+                    for name, pos in preset_data["node_positions"].items()
+                }
+                self.canvas.set_node_positions(positions)
+            
+            # Load connections
+            connections = preset_data.get("connections", [])
+            success_count = 0
+            failed_count = 0
+            failed_connections = []
+            
+            for conn in connections:
+                output_port = conn["output"]
+                input_port = conn["input"]
+                
+                try:
+                    # Check if ports exist
+                    output_client = output_port.split(':')[0]
+                    input_client = input_port.split(':')[0]
+                    
+                    if output_client not in self.canvas.nodes or input_client not in self.canvas.nodes:
+                        failed_count += 1
+                        failed_connections.append(f"{output_port} -> {input_port} (node not found)")
+                        continue
+                    
+                    # Try to connect
+                    self.jack_manager.connect(output_port, input_port)
+                    self.canvas.add_connection(output_port, input_port)
+                    success_count += 1
+                    
+                except Exception as e:
+                    failed_count += 1
+                    failed_connections.append(f"{output_port} -> {input_port} ({e})")
+            
+            # Show results
+            message = f"Loaded preset '{preset_name}':\n"
+            message += f"✓ {success_count} connections restored\n"
+            if failed_count > 0:
+                message += f"✗ {failed_count} connections failed\n\n"
+                message += "Failed connections:\n"
+                message += "\n".join(failed_connections[:10])  # Show first 10
+                if len(failed_connections) > 10:
+                    message += f"\n... and {len(failed_connections) - 10} more"
+            
+            if failed_count > 0:
+                QMessageBox.warning(self, "Preset Loaded (Partial)", message)
+            else:
+                QMessageBox.information(self, "Preset Loaded", message)
+            
+            logger.info(f"Loaded preset: {preset_path} ({success_count} connections, {failed_count} failed)")
+            
+        except Exception as e:
+            logger.error(f"Failed to load preset: {e}")
+            QMessageBox.critical(self, "Load Failed", f"Could not load preset:\n{e}")
+    
+    def _delete_preset(self):
+        """Delete selected preset."""
+        preset_name = self.preset_combo.currentText()
+        if not preset_name:
+            QMessageBox.warning(self, "No Preset", "Please select a preset to delete.")
+            return
+        
+        # Confirm deletion
+        reply = QMessageBox.question(
+            self, "Delete Preset",
+            f"Are you sure you want to delete preset '{preset_name}'?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        # Find and delete preset file
+        preset_files = list(self.presets_dir.glob("*.json"))
+        for path in preset_files:
+            try:
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                    if data.get("name") == preset_name:
+                        path.unlink()
+                        logger.info(f"Deleted preset: {path}")
+                        QMessageBox.information(self, "Preset Deleted", f"Preset '{preset_name}' deleted.")
+                        self._refresh_preset_list()
+                        return
+            except:
+                continue
+        
+        QMessageBox.warning(self, "Delete Failed", f"Could not find preset file for '{preset_name}'.")
+    
+    def _refresh_preset_list(self):
+        """Refresh preset dropdown."""
+        current = self.preset_combo.currentText()
+        self.preset_combo.clear()
+        
+        # Load preset names from files
+        preset_files = list(self.presets_dir.glob("*.json"))
+        preset_names = []
+        
+        for path in preset_files:
+            try:
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                    name = data.get("name", path.stem)
+                    preset_names.append(name)
+            except:
+                continue
+        
+        preset_names.sort()
+        self.preset_combo.addItems(preset_names)
+        
+        # Restore selection if possible
+        index = self.preset_combo.findText(current)
+        if index >= 0:
+            self.preset_combo.setCurrentIndex(index)
