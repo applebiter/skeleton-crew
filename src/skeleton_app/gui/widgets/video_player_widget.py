@@ -82,6 +82,15 @@ class VideoPlayerWidget(QWidget):
         self.time_label.setMinimumWidth(100)
         control_layout.addWidget(self.time_label)
         
+        # Volume slider
+        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(0)  # Start at 0 since muted
+        self.volume_slider.setMaximumWidth(100)
+        self.volume_slider.valueChanged.connect(self._on_volume_changed)
+        self.volume_slider.setToolTip("Volume (muted by default)")
+        control_layout.addWidget(self.volume_slider)
+        
         # Mute button
         self.mute_button = QPushButton()
         self.mute_button.setIcon(self.style().standardIcon(QStyle.SP_MediaVolumeMuted))
@@ -89,6 +98,13 @@ class VideoPlayerWidget(QWidget):
         self.mute_button.setMaximumWidth(40)
         self.mute_button.setToolTip("Audio muted (JACK handles audio)")
         control_layout.addWidget(self.mute_button)
+        
+        # Fullscreen button
+        self.fullscreen_button = QPushButton("⛶")
+        self.fullscreen_button.clicked.connect(self._toggle_fullscreen)
+        self.fullscreen_button.setMaximumWidth(40)
+        self.fullscreen_button.setToolTip("Toggle fullscreen")
+        control_layout.addWidget(self.fullscreen_button)
         
         # Detach button
         self.detach_button = QPushButton("Detach")
@@ -141,6 +157,16 @@ class VideoPlayerWidget(QWidget):
         """Stop playback."""
         self.player.stop()
     
+    def _on_volume_changed(self, value: int):
+        """Handle volume slider change."""
+        volume = value / 100.0
+        self.player.audio_output.setVolume(volume)
+        
+        # Auto-unmute if volume raised above 0
+        if value > 0 and self.player.audio_output.isMuted():
+            self.player.audio_output.setMuted(False)
+            self.mute_button.setIcon(self.style().standardIcon(QStyle.SP_MediaVolume))
+    
     def _toggle_mute(self):
         """Toggle mute state."""
         is_muted = self.player.audio_output.isMuted()
@@ -149,15 +175,40 @@ class VideoPlayerWidget(QWidget):
         if is_muted:
             self.mute_button.setIcon(self.style().standardIcon(QStyle.SP_MediaVolume))
             self.mute_button.setToolTip("Audio enabled (not recommended with JACK)")
+            # Set volume slider to a reasonable level if it was 0
+            if self.volume_slider.value() == 0:
+                self.volume_slider.setValue(50)
         else:
             self.mute_button.setIcon(self.style().standardIcon(QStyle.SP_MediaVolumeMuted))
             self.mute_button.setToolTip("Audio muted (JACK handles audio)")
+    
+    def _toggle_fullscreen(self):
+        """Toggle fullscreen mode."""
+        if self.is_detached and self.detached_window:
+            # Toggle fullscreen on detached window
+            if self.detached_window.isFullScreen():
+                self.detached_window.showNormal()
+                self.fullscreen_button.setText("⛶")
+            else:
+                self.detached_window.showFullScreen()
+                self.fullscreen_button.setText("⛉")
+        else:
+            # Create detached window in fullscreen
+            self._toggle_detach()
+            if self.detached_window:
+                self.detached_window.showFullScreen()
+                self.fullscreen_button.setText("⛉")
     
     def _toggle_detach(self):
         """Toggle detached window."""
         if self.is_detached:
             # Re-attach
             if self.detached_window:
+                # Exit fullscreen first if needed
+                if self.detached_window.isFullScreen():
+                    self.detached_window.showNormal()
+                    self.fullscreen_button.setText("⛶")
+                
                 # Move video widget back to this widget
                 self.video_widget.setParent(self)
                 self.layout().insertWidget(0, self.video_widget)
@@ -169,13 +220,25 @@ class VideoPlayerWidget(QWidget):
         else:
             # Detach
             from PySide6.QtWidgets import QDialog
+            from PySide6.QtCore import Qt
             
             self.detached_window = QDialog(self)
             file_name = self.player.file_path.name if self.player.file_path else "Video"
             self.detached_window.setWindowTitle(f"{file_name} - {self.player.instance_id}")
-            self.detached_window.setMinimumSize(800, 600)
+            
+            # Maximize window by default
+            self.detached_window.setWindowState(Qt.WindowMaximized)
+            
+            # Allow fullscreen
+            self.detached_window.setWindowFlags(
+                Qt.Window | 
+                Qt.WindowMaximizeButtonHint | 
+                Qt.WindowMinimizeButtonHint | 
+                Qt.WindowCloseButtonHint
+            )
             
             layout = QVBoxLayout()
+            layout.setContentsMargins(0, 0, 0, 0)
             
             # Move video widget to detached window
             self.video_widget.setParent(self.detached_window)
@@ -189,10 +252,18 @@ class VideoPlayerWidget(QWidget):
             
             # Connect window close to re-attach
             self.detached_window.finished.connect(self._on_detached_closed)
+            
+            # Add keyboard shortcut for fullscreen (F11)
+            from PySide6.QtGui import QShortcut, QKeySequence
+            fullscreen_shortcut = QShortcut(QKeySequence(Qt.Key_F11), self.detached_window)
+            fullscreen_shortcut.activated.connect(self._toggle_fullscreen)
     
     def _on_detached_closed(self):
         """Handle detached window close."""
         if self.is_detached:
+            # Reset fullscreen button
+            self.fullscreen_button.setText("⛶")
+            
             # Re-attach video widget
             self.video_widget.setParent(self)
             self.layout().insertWidget(0, self.video_widget)
