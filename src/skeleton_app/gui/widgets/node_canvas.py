@@ -360,7 +360,7 @@ class NodeCanvas(QGraphicsView):
     
     def wheelEvent(self, event):
         """Zoom with mouse wheel."""
-        zoom_factor = 1.15
+        zoom_factor = 1.25
         if event.angleDelta().y() > 0:
             self.scale(zoom_factor, zoom_factor)
         else:
