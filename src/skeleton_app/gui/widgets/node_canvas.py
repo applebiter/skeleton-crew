@@ -408,7 +408,10 @@ class NodeCanvas(QGraphicsView):
     
     def mouseMoveEvent(self, event):
         """Handle mouse move for panning."""
-        if self._panning:
+        # Don't interfere if an item has grabbed the mouse
+        if self.scene.mouseGrabberItem():
+            super().mouseMoveEvent(event)
+        elif self._panning:
             delta = event.pos() - self._pan_start
             self._pan_start = event.pos()
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
