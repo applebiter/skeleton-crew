@@ -59,6 +59,9 @@ class PortItem(QGraphicsEllipseItem):
         self.setAcceptHoverEvents(True)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
         
+        # Don't let ports block parent node dragging
+        self.setAcceptedMouseButtons(Qt.NoButton)
+        
         # Connection tracking
         self.connections: List['ConnectionItem'] = []
         
