@@ -146,11 +146,12 @@ class NodeItem(QGraphicsRectItem):
         # Ports
         self.input_ports: List[PortItem] = []
         self.output_ports: List[PortItem] = []
-        
-        # Manual dragging state
-        self._dragging = False
-        self._drag_start_pos = QPointF()
-        self._item_start_pos = QPointF()
+    
+    def itemChange(self, change, value):
+        """Handle item changes to update connections."""
+        if change == QGraphicsItem.ItemPositionHasChanged:
+            self._update_connections()
+        return super().itemChange(change, value)
     
     def add_input_port(self, port_name: str, port_type: PortType = PortType.AUDIO_INPUT) -> PortItem:
         """Add an input port to the left side."""
@@ -357,26 +358,20 @@ class NodeCanvas(QGraphicsView):
         self.viewport_changed.emit()
     
     def mousePressEvent(self, event):
-        """Handle mouse press for panning and node dragging."""
-        item_at_pos = self.itemAt(event.pos())
-        
-        # Check if we clicked on a node (or child of a node)
-        if event.button() == Qt.LeftButton and item_at_pos:
-            # Walk up parent hierarchy to find NodeItem
-            node = None
-            current = item_at_pos
-            while current:
-                if isinstance(current, NodeItem):
-                    node = current
-                    break
-                current = current.parentItem()
-            
-            if node:
-                self._dragging_node = node
-                self._drag_start_scene_pos = self.mapToScene(event.pos())
-                self._drag_start_item_pos = node.pos()
-                event.accept()
-                return
+        """Enable canvas panning with middle mouse button."""
+        if event.button() == Qt.MiddleButton:
+            self.setDragMode(QGraphicsView.ScrollHandDrag)
+            super().mousePressEvent(event)
+        else:
+            self.setDragMode(QGraphicsView.NoDrag)
+            super().mousePressEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """Reset drag mode when middle mouse is released."""
+        super().mouseReleaseEvent(event)
+        self.setDragMode(QGraphicsView.NoDrag)
+    
+    def scrollContentsBy(self, dx: int, dy: int):
         
         # Allow panning with left-click on background or middle-click anywhere
         if event.button() == Qt.MiddleButton or (event.button() == Qt.LeftButton and not item_at_pos):
@@ -386,46 +381,6 @@ class NodeCanvas(QGraphicsView):
             event.accept()
         else:
             super().mousePressEvent(event)
-    
-    def mouseMoveEvent(self, event):
-        """Handle mouse move for panning and node dragging."""
-        # Handle node dragging
-        if self._dragging_node:
-            current_scene_pos = self.mapToScene(event.pos())
-            delta = current_scene_pos - self._drag_start_scene_pos
-            new_pos = self._drag_start_item_pos + delta
-            self._dragging_node.setPos(new_pos)
-            self._dragging_node._update_connections()
-            logger.debug(f"Dragging node to {new_pos}, delta={delta}")
-            event.accept()
-            return
-        
-        # Handle panning
-        if self._panning:
-            delta = event.pos() - self._pan_start
-            self._pan_start = event.pos()
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
-            event.accept()
-        else:
-            super().mouseMoveEvent(event)
-    
-    def mouseReleaseEvent(self, event):
-        """Handle mouse release for panning and node dragging."""
-        # Handle node dragging
-        if event.button() == Qt.LeftButton and self._dragging_node:
-            self._dragging_node._update_connections()
-            self._dragging_node = None
-            event.accept()
-            return
-        
-        # Handle panning
-        if (event.button() == Qt.MiddleButton or event.button() == Qt.LeftButton) and self._panning:
-            self._panning = False
-            self.setCursor(Qt.ArrowCursor)
-            event.accept()
-        else:
-            super().mouseReleaseEvent(event)
     
     def scrollContentsBy(self, dx: int, dy: int):
         """Override to emit viewport changed signal."""
