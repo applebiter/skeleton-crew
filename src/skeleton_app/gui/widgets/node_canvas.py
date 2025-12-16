@@ -134,7 +134,6 @@ class NodeItem(QGraphicsRectItem):
         self.setPen(QPen(QColor(200, 200, 200), 2))
         self.setFlag(QGraphicsItem.ItemIsMovable)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
-        # Remove ItemSendsGeometryChanges - it causes position jumping
         
         # Title
         self.title = QGraphicsTextItem(client_name, self)
@@ -147,8 +146,8 @@ class NodeItem(QGraphicsRectItem):
         self.input_ports: List[PortItem] = []
         self.output_ports: List[PortItem] = []
         
-        # Track last position to detect actual moves
-        self._last_pos = self.pos()
+        # For dragging
+        self._dragging = False
     
     def add_input_port(self, port_name: str, port_type: PortType = PortType.AUDIO_INPUT) -> PortItem:
         """Add an input port to the left side."""
@@ -180,17 +179,29 @@ class NodeItem(QGraphicsRectItem):
         for i, port in enumerate(self.output_ports):
             port.setPos(self.rect().width(), 30 + i * 20)
     
-    def itemChange(self, change, value):
-        """Update connections when node moves."""
-        if change == QGraphicsItem.ItemPositionChange:
-            # Update connections during move for smooth animation
-            new_pos = value
-            if new_pos != self._last_pos:
-                for port in self.input_ports + self.output_ports:
-                    for connection in port.connections:
-                        connection.update_position()
-                self._last_pos = new_pos
-        return value  # Return the value as-is, don't call super
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for dragging."""
+        super().mouseMoveEvent(event)
+        # Update connections as we drag
+        if self._dragging:
+            self._update_connections()
+    
+    def mousePressEvent(self, event):
+        """Handle mouse press."""
+        super().mousePressEvent(event)
+        self._dragging = True
+    
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release."""
+        super().mouseReleaseEvent(event)
+        self._dragging = False
+        self._update_connections()
+    
+    def _update_connections(self):
+        """Update all connected lines."""
+        for port in self.input_ports + self.output_ports:
+            for connection in port.connections:
+                connection.update_position()
 
 
 class ConnectionItem(QGraphicsLineItem):
