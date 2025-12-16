@@ -132,7 +132,7 @@ class NodeItem(QGraphicsRectItem):
         # Style
         self.setBrush(QBrush(QColor(50, 50, 50)))
         self.setPen(QPen(QColor(200, 200, 200), 2))
-        # Don't use ItemIsMovable - we'll handle dragging manually
+        # Items are selectable but view handles movement
         self.setFlag(QGraphicsItem.ItemIsSelectable)
         
         # Title
@@ -180,44 +180,6 @@ class NodeItem(QGraphicsRectItem):
         # Reposition output ports to right edge
         for i, port in enumerate(self.output_ports):
             port.setPos(self.rect().width(), 30 + i * 20)
-    
-    def mousePressEvent(self, event):
-        """Handle mouse press to start dragging."""
-        if event.button() == Qt.LeftButton:
-            self._dragging = True
-            self._drag_start_pos = event.scenePos()
-            self._item_start_pos = self.pos()
-            # Grab mouse to ensure we receive all move events
-            self.grabMouse()
-            event.accept()
-        else:
-            event.ignore()
-    
-    def mouseMoveEvent(self, event):
-        """Handle mouse move for manual dragging."""
-        if self._dragging:
-            # Calculate delta in scene coordinates
-            delta = event.scenePos() - self._drag_start_pos
-            # Move to new position
-            new_pos = self._item_start_pos + delta
-            self.setPos(new_pos)
-            # Update connections
-            self._update_connections()
-            event.accept()
-        else:
-            event.ignore()
-    
-    def mouseReleaseEvent(self, event):
-        """Handle mouse release to end dragging."""
-        if event.button() == Qt.LeftButton:
-            if self._dragging:
-                self._dragging = False
-                self._update_connections()
-                # Release mouse grab
-                self.ungrabMouse()
-            event.accept()
-        else:
-            event.ignore()
     
     def _update_connections(self):
         """Update all connected lines."""
@@ -289,6 +251,11 @@ class NodeCanvas(QGraphicsView):
         self.setDragMode(QGraphicsView.NoDrag)
         self._panning = False
         self._pan_start = QPoint()
+        
+        # Node dragging
+        self._dragging_node: Optional[NodeItem] = None
+        self._drag_start_scene_pos = QPointF()
+        self._drag_start_item_pos = QPointF()
         
         # Node tracking
         self.nodes: Dict[str, NodeItem] = {}  # client_name -> NodeItem
@@ -395,9 +362,18 @@ class NodeCanvas(QGraphicsView):
         self.viewport_changed.emit()
     
     def mousePressEvent(self, event):
-        """Handle mouse press for panning."""
-        # Allow panning with left-click on background or middle-click anywhere
+        """Handle mouse press for panning and node dragging."""
         item_at_pos = self.itemAt(event.pos())
+        
+        # Check if we clicked on a node
+        if event.button() == Qt.LeftButton and isinstance(item_at_pos, NodeItem):
+            self._dragging_node = item_at_pos
+            self._drag_start_scene_pos = self.mapToScene(event.pos())
+            self._drag_start_item_pos = item_at_pos.pos()
+            event.accept()
+            return
+        
+        # Allow panning with left-click on background or middle-click anywhere
         if event.button() == Qt.MiddleButton or (event.button() == Qt.LeftButton and not item_at_pos):
             self._panning = True
             self._pan_start = event.pos()
@@ -407,11 +383,19 @@ class NodeCanvas(QGraphicsView):
             super().mousePressEvent(event)
     
     def mouseMoveEvent(self, event):
-        """Handle mouse move for panning."""
-        # Don't interfere if an item has grabbed the mouse
-        if self.scene.mouseGrabberItem():
-            super().mouseMoveEvent(event)
-        elif self._panning:
+        """Handle mouse move for panning and node dragging."""
+        # Handle node dragging
+        if self._dragging_node:
+            current_scene_pos = self.mapToScene(event.pos())
+            delta = current_scene_pos - self._drag_start_scene_pos
+            new_pos = self._drag_start_item_pos + delta
+            self._dragging_node.setPos(new_pos)
+            self._dragging_node._update_connections()
+            event.accept()
+            return
+        
+        # Handle panning
+        if self._panning:
             delta = event.pos() - self._pan_start
             self._pan_start = event.pos()
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
@@ -421,7 +405,15 @@ class NodeCanvas(QGraphicsView):
             super().mouseMoveEvent(event)
     
     def mouseReleaseEvent(self, event):
-        """Handle mouse release for panning."""
+        """Handle mouse release for panning and node dragging."""
+        # Handle node dragging
+        if event.button() == Qt.LeftButton and self._dragging_node:
+            self._dragging_node._update_connections()
+            self._dragging_node = None
+            event.accept()
+            return
+        
+        # Handle panning
         if (event.button() == Qt.MiddleButton or event.button() == Qt.LeftButton) and self._panning:
             self._panning = False
             self.setCursor(Qt.ArrowCursor)
