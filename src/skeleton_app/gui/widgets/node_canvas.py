@@ -401,6 +401,7 @@ class NodeCanvas(QGraphicsView):
             new_pos = self._drag_start_item_pos + delta
             self._dragging_node.setPos(new_pos)
             self._dragging_node._update_connections()
+            logger.debug(f"Dragging node to {new_pos}, delta={delta}")
             event.accept()
             return
         
