@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGraphicsView, QGraphicsScene,
-    QGraphicsItem, QGraphicsEllipseItem, QPushButton, QComboBox, QLabel,
+    QGraphicsItem, QGraphicsEllipseItem, QGraphicsPathItem, QPushButton, QComboBox, QLabel,
     QInputDialog, QMessageBox
 )
 from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, Signal
