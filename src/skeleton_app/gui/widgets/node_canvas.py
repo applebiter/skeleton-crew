@@ -187,9 +187,10 @@ class NodeItem(QGraphicsRectItem):
             self._dragging = True
             self._drag_start_pos = event.scenePos()
             self._item_start_pos = self.pos()
+            # Accept and don't propagate to prevent view's ScrollHandDrag from interfering
             event.accept()
         else:
-            super().mousePressEvent(event)
+            event.ignore()
     
     def mouseMoveEvent(self, event):
         """Handle mouse move for manual dragging."""
@@ -201,18 +202,20 @@ class NodeItem(QGraphicsRectItem):
             self.setPos(new_pos)
             # Update connections
             self._update_connections()
+            # Accept and don't propagate
             event.accept()
         else:
-            super().mouseMoveEvent(event)
+            event.ignore()
     
     def mouseReleaseEvent(self, event):
         """Handle mouse release to end dragging."""
-        if event.button() == Qt.LeftButton and self._dragging:
-            self._dragging = False
-            self._update_connections()
+        if event.button() == Qt.LeftButton:
+            if self._dragging:
+                self._dragging = False
+                self._update_connections()
             event.accept()
         else:
-            super().mouseReleaseEvent(event)
+            event.ignore()
     
     def _update_connections(self):
         """Update all connected lines."""
