@@ -365,13 +365,23 @@ class NodeCanvas(QGraphicsView):
         """Handle mouse press for panning and node dragging."""
         item_at_pos = self.itemAt(event.pos())
         
-        # Check if we clicked on a node
-        if event.button() == Qt.LeftButton and isinstance(item_at_pos, NodeItem):
-            self._dragging_node = item_at_pos
-            self._drag_start_scene_pos = self.mapToScene(event.pos())
-            self._drag_start_item_pos = item_at_pos.pos()
-            event.accept()
-            return
+        # Check if we clicked on a node (or child of a node)
+        if event.button() == Qt.LeftButton and item_at_pos:
+            # Walk up parent hierarchy to find NodeItem
+            node = None
+            current = item_at_pos
+            while current:
+                if isinstance(current, NodeItem):
+                    node = current
+                    break
+                current = current.parentItem()
+            
+            if node:
+                self._dragging_node = node
+                self._drag_start_scene_pos = self.mapToScene(event.pos())
+                self._drag_start_item_pos = node.pos()
+                event.accept()
+                return
         
         # Allow panning with left-click on background or middle-click anywhere
         if event.button() == Qt.MiddleButton or (event.button() == Qt.LeftButton and not item_at_pos):
