@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QGraphicsEllipseItem, QPushButton, QComboBox, QLabel, QToolBar,
     QInputDialog, QMessageBox, QFileDialog, QSizePolicy
 )
-from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, Signal, QLineF, QSize
+from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, Signal, QLineF, QSize, QPoint
 from PySide6.QtGui import (
     QPen, QBrush, QColor, QPainter, QPainterPath,
     QLinearGradient, QFont, QAction, QResizeEvent
