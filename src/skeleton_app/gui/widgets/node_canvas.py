@@ -124,35 +124,43 @@ class PortItem(QGraphicsEllipseItem):
         super().mouseReleaseEvent(event)
 
 
-class NodeItem(QGraphicsRectItem):
+class NodeItem(QGraphicsItem):
     """Visual representation of a JACK client node."""
     
     def __init__(self, client_name: str, x: float = 0, y: float = 0):
-        super().__init__(0, 0, 150, 100)
+        super().__init__()
         self.client_name = client_name
         self.setPos(x, y)
+        self.width, self.height = 150, 100
         
-        # Style
-        self.setBrush(QBrush(QColor(50, 50, 50)))
-        self.setPen(QPen(QColor(200, 200, 200), 2))
-        # Make items movable and selectable with position change notifications
-        self.setFlag(QGraphicsItem.ItemIsMovable)
-        self.setFlag(QGraphicsItem.ItemIsSelectable)
-        self.setFlag(QGraphicsItem.ItemSendsScenePositionChanges)
-        
-        # Title
-        self.title = QGraphicsTextItem(client_name, self)
-        self.title.setDefaultTextColor(QColor(255, 255, 255))
-        font = QFont("Sans", 10, QFont.Bold)
-        self.title.setFont(font)
-        self.title.setPos(10, 5)
-        # Don't let title intercept mouse events
-        self.title.setFlag(QGraphicsItem.ItemIsSelectable, False)
-        self.title.setAcceptedMouseButtons(Qt.NoButton)
+        # Use EXACT flags from working reference
+        self.setFlags(QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemIsSelectable | QGraphicsItem.ItemSendsScenePositionChanges)
         
         # Ports
         self.input_ports: List[PortItem] = []
         self.output_ports: List[PortItem] = []
+    
+    def boundingRect(self):
+        return QRectF(0, 0, self.width, self.height)
+    
+    def paint(self, painter, option, widget):
+        # Draw node background
+        painter.setBrush(QColor(50, 50, 50))
+        painter.setPen(QPen(QColor(200, 200, 200), 2))
+        painter.drawRect(self.boundingRect())
+        
+        # Draw title
+        painter.setPen(QColor(255, 255, 255))
+        font = QFont("Sans", 10, QFont.Bold)
+        painter.setFont(font)
+        painter.drawText(10, 20, self.client_name)
+    
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionHasChanged:
+            for port in self.input_ports + self.output_ports:
+                for edge in port.connections:
+                    edge.update_position()
+        return super().itemChange(change, value)
     
     def add_input_port(self, port_name: str, port_type: PortType = PortType.AUDIO_INPUT) -> PortItem:
         """Add an input port to the left side."""
