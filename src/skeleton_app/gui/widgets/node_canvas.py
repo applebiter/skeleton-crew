@@ -148,19 +148,6 @@ class NodeItem(QGraphicsRectItem):
         self.input_ports: List[PortItem] = []
         self.output_ports: List[PortItem] = []
     
-    def itemChange(self, change, value):
-        """Handle item changes to update connections."""
-        # Don't interfere with position changes - just pass through
-        result = super().itemChange(change, value)
-        
-        # Update connections AFTER the change is complete
-        if change == QGraphicsItem.ItemPositionHasChanged:
-            # Schedule update for next event loop to avoid interfering with drag
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(0, self._update_connections)
-        
-        return result
-    
     def add_input_port(self, port_name: str, port_type: PortType = PortType.AUDIO_INPUT) -> PortItem:
         """Add an input port to the left side."""
         port = PortItem(port_name, port_type, self)
