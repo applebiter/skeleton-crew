@@ -289,8 +289,21 @@ class NodeCanvasWidget(QWidget):
     
     def _refresh_canvas(self):
         try:
-            clients = self.jack_manager.get_ports()
+            # Get all ports
+            all_ports = self.jack_manager.get_ports(is_audio=True)
+            output_ports = set(self.jack_manager.get_ports(is_output=True, is_audio=True))
             connections = self.jack_manager.get_all_connections()
+            
+            # Group ports by client
+            clients = {}
+            for port_name in all_ports:
+                if ':' not in port_name:
+                    continue
+                client_name = port_name.split(':')[0]
+                port_short = ':'.join(port_name.split(':')[1:])
+                if client_name not in clients:
+                    clients[client_name] = []
+                clients[client_name].append((port_short, port_name))
             
             # Clear and rebuild
             self.canvas.clear_all()
@@ -299,25 +312,25 @@ class NodeCanvasWidget(QWidget):
             for client_name, ports in clients.items():
                 if client_name == "system":
                     # Split system into capture and playback
-                    if any("capture" in p for p in ports):
-                        node = self.canvas.add_node("system (capture)")
-                        for port in ports:
-                            if "capture" in port:
-                                node.add_output_socket(port, f"system:{port}")
+                    capture_ports = [(short, full) for short, full in ports if "capture" in short]
+                    playback_ports = [(short, full) for short, full in ports if "playback" in short]
                     
-                    if any("playback" in p for p in ports):
+                    if capture_ports:
+                        node = self.canvas.add_node("system (capture)")
+                        for port_short, port_full in capture_ports:
+                            node.add_output_socket(port_short, port_full)
+                    
+                    if playback_ports:
                         node = self.canvas.add_node("system (playback)")
-                        for port in ports:
-                            if "playback" in port:
-                                node.add_input_socket(port, f"system:{port}")
+                        for port_short, port_full in playback_ports:
+                            node.add_input_socket(port_short, port_full)
                 else:
                     node = self.canvas.add_node(client_name)
-                    for port in ports:
-                        full_name = f"{client_name}:{port}"
-                        if self.jack_manager.is_output_port(full_name):
-                            node.add_output_socket(port, full_name)
+                    for port_short, port_full in ports:
+                        if port_full in output_ports:
+                            node.add_output_socket(port_short, port_full)
                         else:
-                            node.add_input_socket(port, full_name)
+                            node.add_input_socket(port_short, port_full)
             
             # Create connections
             for out_port, in_ports in connections.items():
@@ -325,7 +338,7 @@ class NodeCanvasWidget(QWidget):
                     self.canvas.add_connection(out_port, in_port)
         
         except Exception as e:
-            logger.error(f"Error refreshing canvas: {e}")
+            logger.error(f"Error refreshing canvas: {e}", exc_info=True)
     
     def _on_connect(self, output_port: str, input_port: str):
         try:
