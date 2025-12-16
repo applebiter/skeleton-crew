@@ -150,6 +150,7 @@ class NodeItem(QGraphicsRectItem):
     
     def itemChange(self, change, value):
         """Handle item changes to update connections."""
+        # Update connections after position has changed
         if change == QGraphicsItem.ItemPositionHasChanged:
             self._update_connections()
         return super().itemChange(change, value)
