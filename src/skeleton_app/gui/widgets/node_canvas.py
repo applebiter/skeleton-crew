@@ -132,9 +132,10 @@ class NodeItem(QGraphicsRectItem):
         # Style
         self.setBrush(QBrush(QColor(50, 50, 50)))
         self.setPen(QPen(QColor(200, 200, 200), 2))
-        # Make items movable and selectable
+        # Make items movable and selectable with position change notifications
         self.setFlag(QGraphicsItem.ItemIsMovable)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
+        self.setFlag(QGraphicsItem.ItemSendsScenePositionChanges)
         
         # Title
         self.title = QGraphicsTextItem(client_name, self)
@@ -146,6 +147,12 @@ class NodeItem(QGraphicsRectItem):
         # Ports
         self.input_ports: List[PortItem] = []
         self.output_ports: List[PortItem] = []
+    
+    def itemChange(self, change, value):
+        """Handle item changes to update connections."""
+        if change == QGraphicsItem.ItemPositionHasChanged:
+            self._update_connections()
+        return super().itemChange(change, value)
     
     def add_input_port(self, port_name: str, port_type: PortType = PortType.AUDIO_INPUT) -> PortItem:
         """Add an input port to the left side."""
@@ -238,8 +245,9 @@ class NodeCanvas(QGraphicsView):
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         
-        # Style
-        self.setRenderHint(QPainter.Antialiasing)
+        # No drag mode by default - we'll enable it conditionally
+        self.setDragMode(QGraphicsView.NoDrag)
+        self._is_panning = Falseng)
         self.setBackgroundBrush(QBrush(QColor(30, 30, 30)))
         self.setSceneRect(-2000, -2000, 4000, 4000)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)  # Essential for zoom
@@ -250,12 +258,6 @@ class NodeCanvas(QGraphicsView):
         # Node tracking
         self.nodes: Dict[str, NodeItem] = {}  # client_name -> NodeItem
         self.connections: List[ConnectionItem] = []
-        
-        # Auto-layout tracking
-        self._next_node_x = 50
-        self._next_node_y = 50
-        
-        # Minimap
         self.minimap: Optional['MiniMapView'] = None
         
         # Connection update timer - update connections periodically instead of every frame
@@ -362,26 +364,23 @@ class NodeCanvas(QGraphicsView):
             self.scale(1 / zoom_factor, 1 / zoom_factor)
         self.viewport_changed.emit()
     
-    def mousePressEvent(self, event):
-        """Enable canvas panning with middle mouse or left-click on background."""
+    def mousePresspanning only when clicking on empty space."""
         item_at_pos = self.itemAt(event.pos())
         
-        # Middle mouse always pans
-        if event.button() == Qt.MiddleButton:
+        # Only pan if clicking on empty background with left or middle button
+        if not item_at_pos and (event.button() == Qt.LeftButton or event.button() == Qt.MiddleButton):
+            self._is_panning = True
             self.setDragMode(QGraphicsView.ScrollHandDrag)
-            super().mousePressEvent(event)
-        # Left mouse on background also pans
-        elif event.button() == Qt.LeftButton and not item_at_pos:
-            self.setDragMode(QGraphicsView.ScrollHandDrag)
-            # Create a fake middle mouse event to trigger panning
-            super().mousePressEvent(event)
-        else:
-            self.setDragMode(QGraphicsView.NoDrag)
-            super().mousePressEvent(event)
+        
+        super().mousePressEvent(event)
     
     def mouseReleaseEvent(self, event):
-        """Reset drag mode when middle mouse is released."""
-        super().mouseReleaseEvent(event)
+        """Reset drag mode after panning."""
+        if self._is_panning:
+            self._is_panning = False
+            self.setDragMode(QGraphicsView.NoDrag)
+        
+        super().mouseReleaseEvent(event
         self.setDragMode(QGraphicsView.NoDrag)
     
     def scrollContentsBy(self, dx: int, dy: int):
