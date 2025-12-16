@@ -254,7 +254,6 @@ class NodeCanvas(QGraphicsView):
         
         # No drag mode by default - we'll enable it conditionally
         self.setDragMode(QGraphicsView.NoDrag)
-        self._is_panning = False
         
         # Node tracking
         self.nodes: Dict[str, NodeItem] = {}  # client_name -> NodeItem
@@ -366,25 +365,6 @@ class NodeCanvas(QGraphicsView):
         else:
             self.scale(1 / zoom_factor, 1 / zoom_factor)
         self.viewport_changed.emit()
-    
-    def mousePressEvent(self, event):
-        """Enable panning only when clicking on empty space."""
-        item_at_pos = self.itemAt(event.pos())
-        
-        # Only pan if clicking on empty background with left or middle button
-        if not item_at_pos and (event.button() == Qt.LeftButton or event.button() == Qt.MiddleButton):
-            self._is_panning = True
-            self.setDragMode(QGraphicsView.ScrollHandDrag)
-        
-        super().mousePressEvent(event)
-    
-    def mouseReleaseEvent(self, event):
-        """Reset drag mode after panning."""
-        if self._is_panning:
-            self._is_panning = False
-            self.setDragMode(QGraphicsView.NoDrag)
-        
-        super().mouseReleaseEvent(event)
     
     def scrollContentsBy(self, dx: int, dy: int):
         """Override to emit viewport changed signal."""
