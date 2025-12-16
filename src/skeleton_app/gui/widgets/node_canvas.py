@@ -132,7 +132,8 @@ class NodeItem(QGraphicsRectItem):
         # Style
         self.setBrush(QBrush(QColor(50, 50, 50)))
         self.setPen(QPen(QColor(200, 200, 200), 2))
-        # Items are selectable but view handles movement
+        # Make items movable and selectable
+        self.setFlag(QGraphicsItem.ItemIsMovable)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
         
         # Title
@@ -246,16 +247,10 @@ class NodeCanvas(QGraphicsView):
         self.setRenderHint(QPainter.Antialiasing)
         self.setBackgroundBrush(QBrush(QColor(30, 30, 30)))
         self.setSceneRect(-2000, -2000, 4000, 4000)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)  # Essential for zoom
         
-        # Enable panning with middle mouse button only
+        # Start with no drag mode
         self.setDragMode(QGraphicsView.NoDrag)
-        self._panning = False
-        self._pan_start = QPoint()
-        
-        # Node dragging
-        self._dragging_node: Optional[NodeItem] = None
-        self._drag_start_scene_pos = QPointF()
-        self._drag_start_item_pos = QPointF()
         
         # Node tracking
         self.nodes: Dict[str, NodeItem] = {}  # client_name -> NodeItem
