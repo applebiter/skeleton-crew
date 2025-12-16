@@ -132,7 +132,7 @@ class NodeItem(QGraphicsRectItem):
         # Style
         self.setBrush(QBrush(QColor(50, 50, 50)))
         self.setPen(QPen(QColor(200, 200, 200), 2))
-        self.setFlag(QGraphicsItem.ItemIsMovable)
+        # Don't use ItemIsMovable - we'll handle dragging manually
         self.setFlag(QGraphicsItem.ItemIsSelectable)
         
         # Title
@@ -146,8 +146,10 @@ class NodeItem(QGraphicsRectItem):
         self.input_ports: List[PortItem] = []
         self.output_ports: List[PortItem] = []
         
-        # For dragging
+        # Manual dragging state
         self._dragging = False
+        self._drag_start_pos = QPointF()
+        self._item_start_pos = QPointF()
     
     def add_input_port(self, port_name: str, port_type: PortType = PortType.AUDIO_INPUT) -> PortItem:
         """Add an input port to the left side."""
@@ -179,23 +181,38 @@ class NodeItem(QGraphicsRectItem):
         for i, port in enumerate(self.output_ports):
             port.setPos(self.rect().width(), 30 + i * 20)
     
-    def mouseMoveEvent(self, event):
-        """Handle mouse move for dragging."""
-        super().mouseMoveEvent(event)
-        # Update connections as we drag
-        if self._dragging:
-            self._update_connections()
-    
     def mousePressEvent(self, event):
-        """Handle mouse press."""
-        super().mousePressEvent(event)
-        self._dragging = True
+        """Handle mouse press to start dragging."""
+        if event.button() == Qt.LeftButton:
+            self._dragging = True
+            self._drag_start_pos = event.scenePos()
+            self._item_start_pos = self.pos()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for manual dragging."""
+        if self._dragging:
+            # Calculate delta in scene coordinates
+            delta = event.scenePos() - self._drag_start_pos
+            # Move to new position
+            new_pos = self._item_start_pos + delta
+            self.setPos(new_pos)
+            # Update connections
+            self._update_connections()
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
     
     def mouseReleaseEvent(self, event):
-        """Handle mouse release."""
-        super().mouseReleaseEvent(event)
-        self._dragging = False
-        self._update_connections()
+        """Handle mouse release to end dragging."""
+        if event.button() == Qt.LeftButton and self._dragging:
+            self._dragging = False
+            self._update_connections()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
     
     def _update_connections(self):
         """Update all connected lines."""
