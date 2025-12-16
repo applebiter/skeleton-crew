@@ -395,8 +395,10 @@ class NodeCanvas(QGraphicsView):
         self.viewport_changed.emit()
     
     def mousePressEvent(self, event):
-        """Handle mouse press for middle-button panning."""
-        if event.button() == Qt.MiddleButton:
+        """Handle mouse press for panning."""
+        # Allow panning with left-click on background or middle-click anywhere
+        item_at_pos = self.itemAt(event.pos())
+        if event.button() == Qt.MiddleButton or (event.button() == Qt.LeftButton and not item_at_pos):
             self._panning = True
             self._pan_start = event.pos()
             self.setCursor(Qt.ClosedHandCursor)
@@ -417,7 +419,7 @@ class NodeCanvas(QGraphicsView):
     
     def mouseReleaseEvent(self, event):
         """Handle mouse release for panning."""
-        if event.button() == Qt.MiddleButton and self._panning:
+        if (event.button() == Qt.MiddleButton or event.button() == Qt.LeftButton) and self._panning:
             self._panning = False
             self.setCursor(Qt.ArrowCursor)
             event.accept()
