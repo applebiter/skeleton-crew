@@ -285,8 +285,10 @@ class NodeCanvas(QGraphicsView):
         self.setBackgroundBrush(QBrush(QColor(30, 30, 30)))
         self.setSceneRect(-2000, -2000, 4000, 4000)
         
-        # Enable panning
-        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        # Enable panning with middle mouse button only
+        self.setDragMode(QGraphicsView.NoDrag)
+        self._panning = False
+        self._pan_start = QPoint()
         
         # Node tracking
         self.nodes: Dict[str, NodeItem] = {}  # client_name -> NodeItem
@@ -391,6 +393,36 @@ class NodeCanvas(QGraphicsView):
         else:
             self.scale(1 / zoom_factor, 1 / zoom_factor)
         self.viewport_changed.emit()
+    
+    def mousePressEvent(self, event):
+        """Handle mouse press for middle-button panning."""
+        if event.button() == Qt.MiddleButton:
+            self._panning = True
+            self._pan_start = event.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for panning."""
+        if self._panning:
+            delta = event.pos() - self._pan_start
+            self._pan_start = event.pos()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release for panning."""
+        if event.button() == Qt.MiddleButton and self._panning:
+            self._panning = False
+            self.setCursor(Qt.ArrowCursor)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
     
     def scrollContentsBy(self, dx: int, dy: int):
         """Override to emit viewport changed signal."""
