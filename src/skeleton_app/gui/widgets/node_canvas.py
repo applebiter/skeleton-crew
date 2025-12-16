@@ -366,7 +366,8 @@ class NodeCanvas(QGraphicsView):
             self.scale(1 / zoom_factor, 1 / zoom_factor)
         self.viewport_changed.emit()
     
-    def mousePresspanning only when clicking on empty space."""
+    def mousePressEvent(self, event):
+        """Enable panning only when clicking on empty space."""
         item_at_pos = self.itemAt(event.pos())
         
         # Only pan if clicking on empty background with left or middle button
@@ -382,8 +383,7 @@ class NodeCanvas(QGraphicsView):
             self._is_panning = False
             self.setDragMode(QGraphicsView.NoDrag)
         
-        super().mouseReleaseEvent(event
-        self.setDragMode(QGraphicsView.NoDrag)
+        super().mouseReleaseEvent(event)
     
     def scrollContentsBy(self, dx: int, dy: int):
         """Override to emit viewport changed signal."""
