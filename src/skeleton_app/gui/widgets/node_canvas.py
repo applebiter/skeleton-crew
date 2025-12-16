@@ -143,6 +143,9 @@ class NodeItem(QGraphicsRectItem):
         font = QFont("Sans", 10, QFont.Bold)
         self.title.setFont(font)
         self.title.setPos(10, 5)
+        # Don't let title intercept mouse events
+        self.title.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        self.title.setAcceptedMouseButtons(Qt.NoButton)
         
         # Ports
         self.input_ports: List[PortItem] = []
