@@ -358,9 +358,17 @@ class NodeCanvas(QGraphicsView):
         self.viewport_changed.emit()
     
     def mousePressEvent(self, event):
-        """Enable canvas panning with middle mouse button."""
+        """Enable canvas panning with middle mouse or left-click on background."""
+        item_at_pos = self.itemAt(event.pos())
+        
+        # Middle mouse always pans
         if event.button() == Qt.MiddleButton:
             self.setDragMode(QGraphicsView.ScrollHandDrag)
+            super().mousePressEvent(event)
+        # Left mouse on background also pans
+        elif event.button() == Qt.LeftButton and not item_at_pos:
+            self.setDragMode(QGraphicsView.ScrollHandDrag)
+            # Create a fake middle mouse event to trigger panning
             super().mousePressEvent(event)
         else:
             self.setDragMode(QGraphicsView.NoDrag)
@@ -370,17 +378,6 @@ class NodeCanvas(QGraphicsView):
         """Reset drag mode when middle mouse is released."""
         super().mouseReleaseEvent(event)
         self.setDragMode(QGraphicsView.NoDrag)
-    
-    def scrollContentsBy(self, dx: int, dy: int):
-        
-        # Allow panning with left-click on background or middle-click anywhere
-        if event.button() == Qt.MiddleButton or (event.button() == Qt.LeftButton and not item_at_pos):
-            self._panning = True
-            self._pan_start = event.pos()
-            self.setCursor(Qt.ClosedHandCursor)
-            event.accept()
-        else:
-            super().mousePressEvent(event)
     
     def scrollContentsBy(self, dx: int, dy: int):
         """Override to emit viewport changed signal."""
