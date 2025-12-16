@@ -546,19 +546,20 @@ class NodeCanvasWidget(QWidget):
         self.canvas.disconnection_requested.connect(self._on_disconnection_requested)
         layout.addWidget(self.canvas)
         
-        # Create minimap overlay
-        self.minimap = MiniMapView(self.canvas, self.canvas)
-        self.minimap.viewport_move_requested.connect(self._on_minimap_move)
-        self.canvas.viewport_changed.connect(self.minimap.update_viewport_rect)
-        
-        # Position minimap in bottom-left corner
-        self.minimap.setParent(self.canvas)
-        self.minimap.move(10, self.canvas.height() - self.minimap.height() - 10)
-        self.minimap.raise_()  # Bring to front
-        self.minimap.show()
-        
-        # Install event filter to reposition minimap on resize
-        self.canvas.installEventFilter(self)
+        # Minimap temporarily disabled
+        # # Create minimap overlay
+        # self.minimap = MiniMapView(self.canvas, self.canvas)
+        # self.minimap.viewport_move_requested.connect(self._on_minimap_move)
+        # self.canvas.viewport_changed.connect(self.minimap.update_viewport_rect)
+        # 
+        # # Position minimap in bottom-left corner
+        # self.minimap.setParent(self.canvas)
+        # self.minimap.move(10, self.canvas.height() - self.minimap.height() - 10)
+        # self.minimap.raise_()  # Bring to front
+        # self.minimap.show()
+        # 
+        # # Install event filter to reposition minimap on resize
+        # self.canvas.installEventFilter(self)
     
     def set_jack_manager(self, jack_manager: Optional[JackClientManager]):
         """Set JACK manager and populate canvas."""
@@ -566,18 +567,19 @@ class NodeCanvasWidget(QWidget):
         if jack_manager:
             self._refresh_canvas()
     
-    def eventFilter(self, obj, event):
-        """Handle canvas resize to reposition minimap."""
-        if obj == self.canvas and event.type() == event.Type.Resize:
-            # Reposition minimap in bottom-left corner
-            self.minimap.move(10, self.canvas.height() - self.minimap.height() - 10)
-        return super().eventFilter(obj, event)
-    
-    def _on_minimap_move(self, scene_pos: QPointF):
-        """Handle minimap viewport drag."""
-        # Center main view on the requested scene position
-        self.canvas.centerOn(scene_pos)
-        self.minimap.update_viewport_rect()
+    # Minimap methods temporarily disabled
+    # def eventFilter(self, obj, event):
+    #     """Handle canvas resize to reposition minimap."""
+    #     if obj == self.canvas and event.type() == event.Type.Resize:
+    #         # Reposition minimap in bottom-left corner
+    #         self.minimap.move(10, self.canvas.height() - self.minimap.height() - 10)
+    #     return super().eventFilter(obj, event)
+    # 
+    # def _on_minimap_move(self, scene_pos: QPointF):
+    #     """Handle minimap viewport drag."""
+    #     # Center main view on the requested scene position
+    #     self.canvas.centerOn(scene_pos)
+    #     self.minimap.update_viewport_rect()
     
     def _refresh_canvas(self):
         """Refresh canvas from JACK state."""
@@ -663,9 +665,9 @@ class NodeCanvasWidget(QWidget):
         except Exception as e:
             logger.error(f"Failed to get JACK connections: {e}")
         
-        # Update minimap - only refit when nodes change
-        self.minimap.refit_minimap()
-        self.minimap.update_viewport_rect()
+        # Minimap update disabled
+        # self.minimap.refit_minimap()
+        # self.minimap.update_viewport_rect()
     
     def _auto_refresh(self):
         """Auto-refresh if enabled."""
@@ -689,8 +691,9 @@ class NodeCanvasWidget(QWidget):
     def _fit_all(self):
         """Fit all nodes in view."""
         self.canvas.fitInView(self.canvas.scene.itemsBoundingRect(), Qt.KeepAspectRatio)
-        self.minimap.refit_minimap()
-        self.minimap.update_viewport_rect()
+        # Minimap update disabled
+        # self.minimap.refit_minimap()
+        # self.minimap.update_viewport_rect()
     
     def _on_connection_requested(self, output_port: str, input_port: str):
         """Handle connection request."""
