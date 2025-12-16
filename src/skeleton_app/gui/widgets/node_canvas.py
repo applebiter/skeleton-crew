@@ -134,7 +134,7 @@ class NodeItem(QGraphicsRectItem):
         self.setPen(QPen(QColor(200, 200, 200), 2))
         self.setFlag(QGraphicsItem.ItemIsMovable)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
-        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
+        # Remove ItemSendsGeometryChanges - it causes position jumping
         
         # Title
         self.title = QGraphicsTextItem(client_name, self)
@@ -146,6 +146,9 @@ class NodeItem(QGraphicsRectItem):
         # Ports
         self.input_ports: List[PortItem] = []
         self.output_ports: List[PortItem] = []
+        
+        # Track last position to detect actual moves
+        self._last_pos = self.pos()
     
     def add_input_port(self, port_name: str, port_type: PortType = PortType.AUDIO_INPUT) -> PortItem:
         """Add an input port to the left side."""
@@ -179,11 +182,15 @@ class NodeItem(QGraphicsRectItem):
     
     def itemChange(self, change, value):
         """Update connections when node moves."""
-        if change == QGraphicsItem.ItemPositionHasChanged:
-            for port in self.input_ports + self.output_ports:
-                for connection in port.connections:
-                    connection.update_position()
-        return super().itemChange(change, value)
+        if change == QGraphicsItem.ItemPositionChange:
+            # Update connections during move for smooth animation
+            new_pos = value
+            if new_pos != self._last_pos:
+                for port in self.input_ports + self.output_ports:
+                    for connection in port.connections:
+                        connection.update_position()
+                self._last_pos = new_pos
+        return value  # Return the value as-is, don't call super
 
 
 class ConnectionItem(QGraphicsLineItem):
