@@ -245,26 +245,28 @@ class NodeCanvas(QGraphicsView):
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         
-        # No drag mode by default - we'll enable it conditionally
-        self.setDragMode(QGraphicsView.NoDrag)
-        self._is_panning = Falseng)
+        # Style
+        self.setRenderHint(QPainter.Antialiasing)
         self.setBackgroundBrush(QBrush(QColor(30, 30, 30)))
         self.setSceneRect(-2000, -2000, 4000, 4000)
-        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)  # Essential for zoom
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         
-        # Start with no drag mode
+        # No drag mode by default - we'll enable it conditionally
         self.setDragMode(QGraphicsView.NoDrag)
+        self._is_panning = False
         
         # Node tracking
         self.nodes: Dict[str, NodeItem] = {}  # client_name -> NodeItem
         self.connections: List[ConnectionItem] = []
-        self.minimap: Optional['MiniMapView'] = None
         
-        # Connection update timer - update connections periodically instead of every frame
-        self._connection_update_timer = QTimer(self)
-        self._connection_update_timer.timeout.connect(self._update_all_connections)
-        self._connection_update_timer.setInterval(50)  # 20 FPS
-        self._connection_update_timer.start()
+        # Auto-layout tracking
+    
+        # Auto-layout tracking
+        self._next_node_x = 50
+        self._next_node_y = 50
+        
+        # Minimap
+        self.minimap: Optional['MiniMapView'] = None
     
     def _update_all_connections(self):
         """Update all connection positions."""
