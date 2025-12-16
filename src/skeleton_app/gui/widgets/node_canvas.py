@@ -147,12 +147,6 @@ class NodeItem(QGraphicsRectItem):
         self.input_ports: List[PortItem] = []
         self.output_ports: List[PortItem] = []
     
-    def itemChange(self, change, value):
-        """Handle item changes to update connections."""
-        if change == QGraphicsItem.ItemPositionHasChanged:
-            self._update_connections()
-        return super().itemChange(change, value)
-    
     def add_input_port(self, port_name: str, port_type: PortType = PortType.AUDIO_INPUT) -> PortItem:
         """Add an input port to the left side."""
         port = PortItem(port_name, port_type, self)
@@ -263,6 +257,17 @@ class NodeCanvas(QGraphicsView):
         
         # Minimap
         self.minimap: Optional['MiniMapView'] = None
+        
+        # Connection update timer - update connections periodically instead of every frame
+        self._connection_update_timer = QTimer(self)
+        self._connection_update_timer.timeout.connect(self._update_all_connections)
+        self._connection_update_timer.setInterval(50)  # 20 FPS
+        self._connection_update_timer.start()
+    
+    def _update_all_connections(self):
+        """Update all connection positions."""
+        for conn in self.connections:
+            conn.update_position()
     
     def add_node(self, client_name: str, x: Optional[float] = None, y: Optional[float] = None) -> NodeItem:
         """Add a node to the canvas."""
