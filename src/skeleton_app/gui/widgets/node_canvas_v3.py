@@ -144,10 +144,17 @@ class NodeGraphicsItem(QGraphicsItem):
         self.height = max(100, 30 + max_ports * 18 + 10)
     
     def itemChange(self, change, value):
-        # Update model when position changes
+        # Update model when position changes - but DON'T emit changed signal during drag
         if change == QGraphicsItem.ItemPositionHasChanged:
             pos = value.toPointF() if hasattr(value, 'toPointF') else self.pos()
-            self.graph_model.move_node(self.model.name, pos.x(), pos.y())
+            # Update model silently (no signal emission)
+            self.model.x = pos.x()
+            self.model.y = pos.y()
+            # Only update connections that are attached to this node
+            for item in self.scene().items():
+                if isinstance(item, ConnectionGraphicsItem):
+                    if self.model.name in item.conn.output_port or self.model.name in item.conn.input_port:
+                        item.update_path()
         return super().itemChange(change, value)
     
     def get_port_scene_pos(self, port_name: str, is_output: bool) -> QPointF:
