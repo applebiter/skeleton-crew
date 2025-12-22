@@ -68,10 +68,12 @@ llm:
       capabilities:
       - chat
       - planning
+      - tools
       is_default: true
     - name: ministral-3:3b
       capabilities:
       - vision
+      - tools
     - name: nomic-embed-text
       capabilities:
       - embedding
