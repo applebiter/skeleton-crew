@@ -159,8 +159,17 @@ class TransportAgent(QObject):
             while self.jack_client and self.osc_server:
                 try:
                     state, position = self.jack_client.transport_query()
+                    
+                    # Handle state - it might be an int or an enum
+                    if hasattr(state, 'name'):
+                        state_str = str(state.name).lower()
+                    else:
+                        # Map integer state to string
+                        state_map = {0: 'stopped', 1: 'rolling', 2: 'starting'}
+                        state_str = state_map.get(int(state), 'unknown')
+                    
                     current_state = {
-                        "state": str(state.name).lower(),
+                        "state": state_str,
                         "frame": position['frame'],
                         "timestamp": time.time()
                     }
@@ -230,15 +239,23 @@ class TransportAgent(QObject):
         try:
             state, position = self.jack_client.transport_query()
             
+            # Handle state - it might be an int or an enum
+            if hasattr(state, 'name'):
+                state_str = str(state.name).lower()
+            else:
+                # Map integer state to string
+                state_map = {0: 'stopped', 1: 'rolling', 2: 'starting'}
+                state_str = state_map.get(int(state), 'unknown')
+            
             # Send reply if we have a coordinator to reply to
             if self.osc_client:
                 self.osc_client.send_message("/transport/state", [
-                    str(state.name).lower(),
+                    state_str,
                     int(position['frame']),
                     float(time.time())
                 ])
             
-            self.log.emit(f"Query response: {state.name} @ frame {position['frame']}")
+            self.log.emit(f"Query response: {state_str} @ frame {position['frame']}")
         except Exception as e:
             self.error.emit(f"Query failed: {e}")
     
