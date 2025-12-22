@@ -34,9 +34,10 @@ class RemoteJackPanel(QWidget):
     connection_broken = Signal(str, str, str)
     node_changed = Signal(str)  # When user switches to different node
     
-    def __init__(self, parent: Optional[QWidget] = None, tool_registry: Optional[ToolRegistry] = None):
+    def __init__(self, parent: Optional[QWidget] = None, tool_registry: Optional[ToolRegistry] = None, config=None):
         super().__init__(parent)
         self.tool_registry = tool_registry
+        self.config = config
         self.current_node_id: Optional[str] = None
         self.current_node_name: Optional[str] = None
         self.current_node_host: Optional[str] = None  # Host IP for SSH
@@ -204,9 +205,32 @@ class RemoteJackPanel(QWidget):
             return
         
         # Check if this is the local node or a remote node
-        from skeleton_app.config import get_settings
-        settings = get_settings()
-        is_local_node = (self.current_node_id == settings.node.id)
+        is_local_node = (self.config and self.current_node_id == self.config.node.id)
+        
+        try:
+            if is_local_node:
+                # Query local JACK server via tool registry
+                result = await self.tool_registry.execute(
+                    "jack_status",
+                    {},
+                    requester=f"remote_jack_panel:{self.current_node_id}"
+                )
+            else:
+                # Query remote JACK server via SSH
+                result = await self._query_remote_jack_status()
+            
+            if result['status'] == 'success':
+                output = result['output']
+                self._populate_ports(output)
+                self.status_label.setText(f"Connected - {self.current_node_name}")
+                self.status_label.setStyleSheet("color: green;")
+            else:
+                self.status_label.setText(f"Error fetching JACK state: {result.get('error')}")
+                self.status_label.setStyleSheet("color: red;")
+        except Exception as e:
+            logger.error(f"Failed to update remote ports: {e}")
+            self.status_label.setText(f"Error: {e}")
+            self.status_label.setStyleSheet("color: red;")
         
         try:
             if is_local_node:

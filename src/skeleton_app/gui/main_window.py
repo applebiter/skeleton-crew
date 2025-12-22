@@ -199,7 +199,7 @@ class MainWindow(QMainWindow):
         # Remote JACK Panel tab (for cluster nodes)
         self.tool_registry = get_tool_registry()
         register_builtin_tools(self.tool_registry)
-        self.remote_jack = RemoteJackPanel(parent=self, tool_registry=self.tool_registry)
+        self.remote_jack = RemoteJackPanel(parent=self, tool_registry=self.tool_registry, config=self.config)
         self.tabs.addTab(self.remote_jack, "Remote JACK")
         
         # Prevent closing of system tabs (Node Canvas, Patchbay, Remote JACK)
