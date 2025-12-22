@@ -331,9 +331,6 @@ class MainWindow(QMainWindow):
         
         # Update transport panel
         self.transport_panel.set_jack_manager(self.jack_manager)
-        
-        # Update video player manager
-        self.video_manager.set_jack_manager(self.jack_manager)
     
     def _on_jack_disconnected(self):
         """Handle JACK disconnection."""
@@ -478,10 +475,6 @@ class MainWindow(QMainWindow):
                 loop.run_until_complete(self.database.disconnect())
             except Exception:
                 pass
-        
-        # Stop all video players
-        if self.video_manager:
-            self.video_manager.cleanup_all()
         
         # Stop transport services
         if self.transport_agent:
