@@ -6,7 +6,7 @@ on remote machines via tool registry over ZeroMQ.
 """
 
 import logging
-from typing import Optional, Dict, Set
+from typing import Optional, Dict, Set, Any
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -39,6 +39,8 @@ class RemoteJackPanel(QWidget):
         self.tool_registry = tool_registry
         self.current_node_id: Optional[str] = None
         self.current_node_name: Optional[str] = None
+        self.current_node_host: Optional[str] = None  # Host IP for SSH
+        self.available_nodes: Dict = {}  # node_id -> {node_id, node_name, host, ...}
         
         # Track current connections on remote node
         self.connections: Dict[str, Set[str]] = {}
@@ -147,10 +149,13 @@ class RemoteJackPanel(QWidget):
         Update the list of available nodes to choose from.
         
         Args:
-            nodes: List of dicts with 'node_id' and 'node_name' keys
+            nodes: List of dicts with 'node_id', 'node_name', 'host' keys
         """
         self.node_selector.blockSignals(True)
         self.node_selector.clear()
+        
+        # Store node info for later use (especially host for SSH)
+        self.available_nodes = {node['node_id']: node for node in nodes}
         
         for node in nodes:
             self.node_selector.addItem(
@@ -173,6 +178,10 @@ class RemoteJackPanel(QWidget):
         self.current_node_id = node_id
         self.current_node_name = node_name
         
+        # Get host from available_nodes
+        if node_id in self.available_nodes:
+            self.current_node_host = self.available_nodes[node_id].get('host')
+        
         self.title_label.setText(f"Remote JACK Patchbay - {node_name}")
         self.node_changed.emit(node_id)
         
@@ -194,13 +203,22 @@ class RemoteJackPanel(QWidget):
             self.status_label.setText("No node selected or tool registry unavailable")
             return
         
+        # Check if this is the local node or a remote node
+        from skeleton_app.config import get_settings
+        settings = get_settings()
+        is_local_node = (self.current_node_id == settings.node.id)
+        
         try:
-            # Execute jack_status on remote node (placeholder for now)
-            result = await self.tool_registry.execute(
-                "jack_status",
-                {},
-                requester=f"remote_jack_panel:{self.current_node_id}"
-            )
+            if is_local_node:
+                # Query local JACK server via tool registry
+                result = await self.tool_registry.execute(
+                    "jack_status",
+                    {},
+                    requester=f"remote_jack_panel:{self.current_node_id}"
+                )
+            else:
+                # Query remote JACK server via SSH
+                result = await self._query_remote_jack_status()
             
             if result['status'] == 'success':
                 output = result['output']
@@ -214,6 +232,81 @@ class RemoteJackPanel(QWidget):
             logger.error(f"Failed to update remote ports: {e}")
             self.status_label.setText(f"Error: {e}")
             self.status_label.setStyleSheet("color: red;")
+    
+    async def _query_remote_jack_status(self) -> Dict[str, Any]:
+        """Query remote node's JACK status via SSH."""
+        if not self.current_node_host:
+            return {
+                "status": "error",
+                "error": "Remote node host not available"
+            }
+        
+        from skeleton_app.remote import SSHExecutor
+        
+        executor = SSHExecutor()
+        
+        try:
+            # Execute jack_lsp on remote node to get ports
+            exit_code, stdout, stderr = await executor.execute(
+                self.current_node_host,
+                "jack_lsp -c"  # -c for connections
+            )
+            
+            if exit_code != 0:
+                return {
+                    "status": "error",
+                    "error": f"SSH command failed: {stderr}"
+                }
+            
+            # Parse jack_lsp output
+            output_ports = []
+            input_ports = []
+            connections = {}
+            
+            current_port = None
+            for line in stdout.strip().split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Port format: "system:capture_1" (possibly with indentation for connections)
+                if line.startswith(' '):
+                    # This is a connection (indented)
+                    if current_port:
+                        connected_port = line.strip()
+                        if current_port not in connections:
+                            connections[current_port] = []
+                        connections[current_port].append(connected_port)
+                else:
+                    # This is a port name
+                    current_port = line
+                    
+                    # Classify as input or output
+                    if 'capture' in line.lower() or ':out' in line.lower():
+                        output_ports.append(line)
+                    else:
+                        input_ports.append(line)
+            
+            return {
+                "status": "success",
+                "output": {
+                    "ports": {
+                        "output": output_ports,
+                        "input": input_ports,
+                        "total": len(output_ports) + len(input_ports)
+                    },
+                    "connections": connections,
+                    "transport_state": "unknown",
+                    "sample_rate": 44100,
+                    "buffer_size": 256
+                }
+            }
+        except Exception as e:
+            logger.error(f"SSH query failed: {e}")
+            return {
+                "status": "error",
+                "error": f"SSH query failed: {str(e)}"
+            }
     
     def _populate_ports(self, jack_state: dict):
         """Populate the port trees from remote JACK state."""
