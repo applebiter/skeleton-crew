@@ -28,6 +28,7 @@ class ClusterPanel(QWidget):
         super().__init__(parent)
         
         self.service_discovery: Optional[ServiceDiscovery] = None
+        self.discovery_bridge = None
         
         self._setup_ui()
         
@@ -36,18 +37,45 @@ class ClusterPanel(QWidget):
         self.update_timer.timeout.connect(self._update_status)
         self.update_timer.start(2000)  # Update every 2 seconds
     
-    def set_service_discovery(self, service_discovery: Optional[ServiceDiscovery]):
-        """Set the service discovery instance."""
+    def set_service_discovery(self, service_discovery: Optional[ServiceDiscovery], discovery_bridge=None):
+        """Set the service discovery instance and connect to bridge signals."""
         self.service_discovery = service_discovery
+        self.discovery_bridge = discovery_bridge
+        
         if service_discovery:
-            # Add callback for service changes
+            # Add callback for service changes (async updates)
             service_discovery.add_callback(self._on_service_change)
+        
+        # Connect bridge signals if available (Qt signals from async thread)
+        if discovery_bridge:
+            discovery_bridge.node_discovered.connect(self._on_node_discovered)
+            discovery_bridge.service_registered.connect(self._on_service_registered)
+            discovery_bridge.service_updated.connect(self._on_service_updated)
+            discovery_bridge.service_unregistered.connect(self._on_service_unregistered)
+            discovery_bridge.services_loaded.connect(self._update_status)
+        
         self._update_status()
     
     def _on_service_change(self, action: str, service: ServiceInfo):
-        """Handle service change notifications."""
-        # Trigger update on next timer tick
+        """Handle service change notifications from async thread."""
+        # Just trigger update - the signals will also do this
         pass
+    
+    def _on_node_discovered(self, node_id: str, node_name: str, host: str):
+        """Handle node discovery signal from bridge."""
+        self._update_status()
+    
+    def _on_service_registered(self, node_id: str, service_name: str, service_type: str, action: str):
+        """Handle service registration signal from bridge."""
+        self._update_status()
+    
+    def _on_service_updated(self, node_id: str, service_name: str, service_type: str, action: str):
+        """Handle service update signal from bridge."""
+        self._update_status()
+    
+    def _on_service_unregistered(self, node_id: str, service_name: str):
+        """Handle service unregistration signal from bridge."""
+        self._update_status()
     
     def _setup_ui(self):
         """Setup the UI."""

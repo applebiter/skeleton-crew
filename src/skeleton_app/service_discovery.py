@@ -118,7 +118,8 @@ class ServiceDiscovery:
         pub_port: int = 5555,
         sub_port: int = 5556,
         broadcast_port: int = 5557,
-        heartbeat_interval: int = 10
+        heartbeat_interval: int = 10,
+        discovery_bridge = None  # Optional Qt bridge for safe GUI callbacks
     ):
         self.node_id = node_id
         self.node_name = node_name
@@ -128,6 +129,7 @@ class ServiceDiscovery:
         self.sub_port = sub_port
         self.broadcast_port = broadcast_port
         self.heartbeat_interval = heartbeat_interval
+        self.discovery_bridge = discovery_bridge  # Qt signal bridge for thread-safe callbacks
         
         # ZeroMQ context
         self.zmq_context = zmq.asyncio.Context()
@@ -183,6 +185,9 @@ class ServiceDiscovery:
         if self.database and self.database.pool:
             await self._subscribe_to_cluster()
             await self._load_services_from_db()
+            # Signal that initial services have been loaded
+            if self.discovery_bridge:
+                self.discovery_bridge.emit_services_loaded()
         
         self.running = True
         
@@ -519,8 +524,27 @@ class ServiceDiscovery:
                 
                 if action == "unregistered":
                     self.cluster_services[service.node_id].pop(service_key, None)
+                    # Notify via bridge
+                    if self.discovery_bridge:
+                        self.discovery_bridge.emit_service_unregistered(service.node_id, service.service_name)
                 else:
                     self.cluster_services[service.node_id][service_key] = service
+                    # Notify via bridge
+                    if self.discovery_bridge:
+                        if action == "registered":
+                            self.discovery_bridge.emit_service_registered(
+                                service.node_id, 
+                                service.service_name, 
+                                service.service_type.value,
+                                action
+                            )
+                        else:
+                            self.discovery_bridge.emit_service_updated(
+                                service.node_id, 
+                                service.service_name, 
+                                service.service_type.value,
+                                action
+                            )
                 
                 # Notify callbacks
                 for callback in self.callbacks:
@@ -577,7 +601,6 @@ class ServiceDiscovery:
                 logger.error(f"Error in cleanup loop: {e}")    
     async def _broadcast_loop(self):
         """Broadcast node presence on LAN via UDP."""
-        print(f"[DEBUG] Starting UDP broadcast loop for {self.node_name} on port {self.broadcast_port}")
         logger.info(f"Starting UDP broadcast loop for {self.node_name}")
         while self.running:
             try:
@@ -591,7 +614,6 @@ class ServiceDiscovery:
                 
                 message = json.dumps(announcement).encode('utf-8')
                 self.broadcast_socket.sendto(message, ('<broadcast>', self.broadcast_port))
-                print(f"[DEBUG] Broadcast sent: {self.node_name} @ {self.node_host}")
                 
                 # Broadcast every 5 seconds
                 await asyncio.sleep(5)
@@ -599,13 +621,11 @@ class ServiceDiscovery:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"[DEBUG] Error in broadcast loop: {e}")
                 logger.error(f"Error in broadcast loop: {e}")
                 await asyncio.sleep(1)
     
     async def _listen_loop(self):
         """Listen for UDP broadcast announcements from other nodes."""
-        print(f"[DEBUG] Starting UDP listen loop on port {self.broadcast_port}")
         logger.info(f"Starting UDP listen loop on port {self.broadcast_port}")
         while self.running:
             try:
@@ -616,27 +636,19 @@ class ServiceDiscovery:
                     lambda: self.listen_socket.recvfrom(4096)
                 )
                 
-                print(f"[DEBUG] Received UDP broadcast from {addr}: {data[:100]}")
-                
                 announcement = json.loads(data.decode('utf-8'))
                 node_id = announcement.get('node_id')
                 
-                print(f"[DEBUG] Parsed announcement: node_id={node_id}, node_name={announcement.get('node_name')}")
-                
                 # Ignore our own broadcasts
                 if node_id == self.node_id:
-                    print(f"[DEBUG] Ignoring own broadcast")
                     continue
                 
                 node_name = announcement.get('node_name')
                 node_host = announcement.get('host')
                 pub_port = announcement.get('pub_port', self.pub_port)
                 
-                print(f"[DEBUG] Processing node: {node_name} at {node_host}:{pub_port}")
-                
                 # Update known nodes
                 if node_id not in self.known_nodes:
-                    print(f"[DEBUG] NEW NODE DISCOVERED: {node_name} ({node_id}) at {node_host}")
                     logger.info(f"Discovered new node via UDP: {node_name} ({node_id}) at {node_host}")
                     
                     # Save to database if available
@@ -657,7 +669,10 @@ class ServiceDiscovery:
                     self.subscribed_nodes.add(node_id)
                     logger.info(f"Subscribed to ZeroMQ from {node_name} at {zmq_endpoint}")
                     
-                    # Notify callbacks about new node
+                    # Notify callbacks about new node (using bridge for thread safety)
+                    if self.discovery_bridge:
+                        self.discovery_bridge.emit_node_discovered(node_id, node_name, node_host)
+                    
                     for callback in self.callbacks:
                         try:
                             if asyncio.iscoroutinefunction(callback):

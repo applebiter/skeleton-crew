@@ -17,16 +17,14 @@ from PySide6.QtGui import QAction, QIcon, QKeySequence
 from skeleton_app.config import Config
 from skeleton_app.database import Database
 from skeleton_app.service_discovery import ServiceDiscovery
+from skeleton_app.gui.discovery_bridge import ServiceDiscoveryBridge
 from skeleton_app.gui.widgets.transport_panel import TransportPanel
 from skeleton_app.gui.widgets.cluster_panel import ClusterPanel
 from skeleton_app.gui.widgets.patchbay_widget import PatchbayWidget
 from skeleton_app.gui.widgets.node_canvas_v3 import NodeCanvasWidget
-from skeleton_app.gui.widgets.video_panel import VideoPanel
-from skeleton_app.gui.widgets.transcode_panel import TranscodePanel
 from skeleton_app.gui.widgets.transport_nodes import TransportAgentNodeWidget, TransportCoordinatorNodeWidget
 from skeleton_app.gui.widgets.settings_dialog import SettingsDialog
 from skeleton_app.audio.jack_client import JackClientManager
-from skeleton_app.audio.qt_video_player import QtVideoPlayerManager
 from skeleton_app.audio.transport_services import TransportAgentService, TransportCoordinatorService
 
 logger = logging.getLogger(__name__)
@@ -35,11 +33,10 @@ class MainWindow(QMainWindow):
     Main application window.
     
     Provides:
-    - JACK transport controls
-    - Visual patchbay
-    - Cluster status
-    - xjadeo video player controls
-    - Command log
+    - JACK transport controls and orchestration
+    - Visual patchbay for JACK graph management
+    - Cluster status and node discovery
+    - Multi-node JACK graph selection and control
     """
     
     # Signals
@@ -48,18 +45,17 @@ class MainWindow(QMainWindow):
     
     def __init__(self, config: Config, config_path: Optional[Path] = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        print(f"[DEBUG] MainWindow.__init__ starting with config: {config.node.name} @ {config.node.host}")
         self.config = config
         self.config_path = config_path or Path("config.yaml")
+        
+        # Create discovery bridge for thread-safe signals
+        self.discovery_bridge = ServiceDiscoveryBridge(self)
         
         # Connect service discovery signal
         self.service_discovery_ready.connect(self._set_service_discovery)
         
         # JACK client manager
         self.jack_manager: Optional[JackClientManager] = None
-        
-        # Qt video player manager
-        self.video_manager = QtVideoPlayerManager()
         
         # Database and service discovery
         self.database: Optional[Database] = None
@@ -97,10 +93,6 @@ class MainWindow(QMainWindow):
     def _create_actions(self):
         """Create menu and toolbar actions."""
         # File menu actions
-        self.open_video_action = QAction("Open &Video...", self)
-        self.open_video_action.setShortcut("Ctrl+O")
-        self.open_video_action.triggered.connect(self._open_video)
-        
         self.quit_action = QAction("&Quit", self)
         self.quit_action.setShortcut(QKeySequence.Quit)
         self.quit_action.triggered.connect(self.close)
@@ -150,8 +142,6 @@ class MainWindow(QMainWindow):
         
         # File menu
         file_menu = menubar.addMenu("&File")
-        file_menu.addAction(self.open_video_action)
-        file_menu.addSeparator()
         file_menu.addAction(self.quit_action)
         
         # JACK menu
@@ -163,8 +153,6 @@ class MainWindow(QMainWindow):
         view_menu = menubar.addMenu("&View")
         view_menu.addAction(self.view_patchbay_action)
         view_menu.addAction(self.view_cluster_action)
-        view_menu.addAction(self.view_video_action)
-        view_menu.addAction(self.view_transcode_action)
         view_menu.addAction(self.view_transport_action)
         
         # Tools menu
@@ -211,8 +199,6 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().setTabButton(0, QTabBar.ButtonPosition.RightSide, None)
         self.tabs.tabBar().setTabButton(1, QTabBar.ButtonPosition.RightSide, None)
         
-        # TODO: Add more tabs (Media Library, Playlist, etc.)
-        
         layout.addWidget(self.tabs)
         
         self.setCentralWidget(central)
@@ -225,20 +211,6 @@ class MainWindow(QMainWindow):
         self.cluster_dock.setWidget(self.cluster_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.cluster_dock)
         
-        # Video players dock (pass main tab widget)
-        self.video_dock = QDockWidget("Video Players", self)
-        self.video_panel = VideoPanel(self.video_manager, self.tabs, self)
-        self.video_dock.setWidget(self.video_panel)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.video_dock)
-        self.video_dock.setVisible(False)
-        
-        # Transcode dock (initially hidden)
-        self.transcode_dock = QDockWidget("Transcode Videos", self)
-        self.transcode_panel = TranscodePanel(self)
-        self.transcode_dock.setWidget(self.transcode_panel)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.transcode_dock)
-        self.transcode_dock.setVisible(False)
-        
         # Transport coordination dock
         self.transport_dock = QDockWidget("Transport Coordination", self)
         self._init_transport_panel()
@@ -247,16 +219,8 @@ class MainWindow(QMainWindow):
         # Connect view actions
         self.view_cluster_action.toggled.connect(self.cluster_dock.setVisible)
         self.cluster_dock.visibilityChanged.connect(self.view_cluster_action.setChecked)
-        self.view_video_action.toggled.connect(self.video_dock.setVisible)
-        self.video_dock.visibilityChanged.connect(self.view_video_action.setChecked)
-        self.view_transcode_action.toggled.connect(self.transcode_dock.setVisible)
-        self.transcode_dock.visibilityChanged.connect(self.view_transcode_action.setChecked)
         self.view_transport_action.toggled.connect(self.transport_dock.setVisible)
         self.transport_dock.visibilityChanged.connect(self.view_transport_action.setChecked)
-    
-    def _open_video(self):
-        """Handle open video action (delegates to video panel)."""
-        self.video_panel._on_open_video()
     
     def _on_tab_close_requested(self, index: int):
         """Handle tab close request."""
@@ -264,16 +228,8 @@ class MainWindow(QMainWindow):
         if index < 2:
             return
         
-        # Get the widget at this index
-        widget = self.tabs.widget(index)
-        
-        # If it's a video player widget, trigger its close
-        from skeleton_app.gui.widgets.video_player_widget import VideoPlayerWidget
-        if isinstance(widget, VideoPlayerWidget):
-            widget.closed.emit(widget.player.instance_id)
-        else:
-            # For other tabs, just remove
-            self.tabs.removeTab(index)
+        # For other tabs, just remove
+        self.tabs.removeTab(index)
     
     def _create_status_bar(self):
         """Create status bar."""
@@ -405,87 +361,68 @@ class MainWindow(QMainWindow):
         import asyncio
         import threading
         
-        print(f"[DEBUG] Starting service discovery initialization for {self.config.node.name}")
         logger.info(f"Starting service discovery initialization for {self.config.node.name}")
         
         def run_async_init():
             """Run async init in a separate thread with its own event loop."""
-            print("[DEBUG] In run_async_init thread")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
             async def _async_init():
                 try:
-                    print("[DEBUG] Async init starting...")
-                    logger.info("Async init starting...")
+                    logger.info("Initializing service discovery...")
                     
                     # Initialize database
                     if self.config.database:
-                        print("[DEBUG] Connecting to database...")
                         logger.info("Connecting to database...")
                         self.database = Database(self.config.database.url)
                         await self.database.connect()
                         await self.database.initialize_schema()
-                        print("[DEBUG] Database connected")
                         logger.info("Database connected")
                     
                     # Initialize service discovery
-                    print(f"[DEBUG] Creating ServiceDiscovery: {self.config.node.name} @ {self.config.node.host}")
                     logger.info(f"Creating ServiceDiscovery: {self.config.node.name} @ {self.config.node.host}")
                     self.service_discovery = ServiceDiscovery(
                         node_id=self.config.node.id,
                         node_name=self.config.node.name,
                         node_host=self.config.node.host,
                         database=self.database,
-                        heartbeat_interval=10
+                        heartbeat_interval=10,
+                        discovery_bridge=self.discovery_bridge
                     )
                     
-                    print("[DEBUG] Starting service discovery...")
                     logger.info("Starting service discovery...")
                     await self.service_discovery.start()
-                    print("[DEBUG] Service discovery started!")
-                    logger.info("Service discovery started!")
+                    logger.info("Service discovery started")
                     
-                    # Update cluster panel (from main thread) using signal
-                    print("[DEBUG] Emitting service_discovery_ready signal...")
+                    # Emit signal to update cluster panel
                     self.service_discovery_ready.emit()
                     
-                    print(f"[DEBUG] Service discovery initialized: {self.config.node.name} @ {self.config.node.host}")
-                    logger.info(f"Service discovery initialized: {self.config.node.name} @ {self.config.node.host}")
+                    logger.info(f"Service discovery initialized: {self.config.node.name}")
                     
                 except Exception as e:
-                    print(f"[DEBUG] Error in async init: {e}")
-                    logger.error(f"Error in async init: {e}", exc_info=True)
+                    logger.error(f"Error initializing service discovery: {e}", exc_info=True)
             
             try:
-                print("[DEBUG] Running async init...")
                 loop.run_until_complete(_async_init())
-                print("[DEBUG] Async init complete, keeping loop running...")
                 # Keep loop running for async tasks
                 loop.run_forever()
             except Exception as e:
-                print(f"[DEBUG] Service discovery init error: {e}")
-                logger.error(f"Service discovery init error: {e}", exc_info=True)
+                logger.error(f"Service discovery thread error: {e}", exc_info=True)
             finally:
                 loop.close()
         
         # Start in daemon thread
-        print("[DEBUG] Creating daemon thread...")
         thread = threading.Thread(target=run_async_init, daemon=True)
         thread.start()
-        print("[DEBUG] Service discovery thread started")
         logger.info("Service discovery thread started")
     
     def _set_service_discovery(self):
         """Set service discovery on cluster panel (must be called from main thread)."""
-        print("[DEBUG] _set_service_discovery called")
         if self.service_discovery:
-            print(f"[DEBUG] Setting service discovery on cluster panel: {self.service_discovery}")
             logger.info("Setting service discovery on cluster panel")
-            self.cluster_panel.set_service_discovery(self.service_discovery)
-            print("[DEBUG] Service discovery set on cluster panel successfully")
+            self.cluster_panel.set_service_discovery(self.service_discovery, self.discovery_bridge)
         else:
-            print("[DEBUG] Service discovery is None!")
             logger.warning("Service discovery not available when trying to set on cluster panel")
     
     def _open_video(self):

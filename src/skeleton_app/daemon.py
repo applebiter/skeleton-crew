@@ -46,7 +46,8 @@ class SkeletonDaemon:
             node_name=self.config.node.name,
             node_host=self.config.node.host,
             database=self.database,
-            heartbeat_interval=10
+            heartbeat_interval=10,
+            discovery_bridge=None  # No Qt bridge in daemon
         )
         await self.service_discovery.start()
         
