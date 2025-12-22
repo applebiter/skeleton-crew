@@ -88,13 +88,22 @@ class ClusterPanel(QWidget):
         """Update cluster service status."""
         if not self.service_discovery:
             self.service_tree.clear()
-            self.stats_label.setText("Service discovery not initialized")
+            self.stats_label.setText("Service discovery not initialized.\nWaiting for initialization...")
+            
+            # Show placeholder
+            placeholder = QTreeWidgetItem(["Initializing service discovery...", "", ""])
+            placeholder.setForeground(0, Qt.yellow)
+            self.service_tree.addTopLevelItem(placeholder)
             return
         
         self.service_tree.clear()
         
         # Get all known nodes (including those discovered via UDP)
-        known_nodes = self.service_discovery.get_known_nodes()
+        try:
+            known_nodes = self.service_discovery.get_known_nodes()
+        except Exception as e:
+            self.stats_label.setText(f"Error getting nodes: {e}")
+            return
         
         # Get all services grouped by node
         all_services = self.service_discovery.get_all_services()
