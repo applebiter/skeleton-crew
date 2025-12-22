@@ -119,7 +119,7 @@ class MainWindow(QMainWindow):
         
         self.view_video_action = QAction("&Video Players", self)
         self.view_video_action.setCheckable(True)
-        self.view_video_action.setChecked(True)
+        self.view_video_action.setChecked(False)
         
         self.view_transcode_action = QAction("&Transcode Videos", self)
         self.view_transcode_action.setCheckable(True)
@@ -224,6 +224,7 @@ class MainWindow(QMainWindow):
         self.video_panel = VideoPanel(self.video_manager, self.tabs, self)
         self.video_dock.setWidget(self.video_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.video_dock)
+        self.video_dock.setVisible(False)
         
         # Transcode dock (initially hidden)
         self.transcode_dock = QDockWidget("Transcode Videos", self)
@@ -421,13 +422,9 @@ class MainWindow(QMainWindow):
                 await self.service_discovery.start()
                 
                 # Update cluster panel (from main thread)
-                from PySide6.QtCore import QMetaObject, Qt
-                QMetaObject.invokeMethod(
-                    self.cluster_panel,
-                    "set_service_discovery",
-                    Qt.QueuedConnection,
-                    self.service_discovery
-                )
+                # We need to use QTimer to call this from the main thread safely
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: self.cluster_panel.set_service_discovery(self.service_discovery))
                 
                 logger.info(f"Service discovery started: {self.config.node.name} @ {self.config.node.host}")
             
