@@ -13,32 +13,131 @@ from skeleton_app.providers.tools import (
 
 logger = logging.getLogger(__name__)
 
+# Import JACK client manager
+try:
+    from skeleton_app.audio.jack_client import JackClientManager
+    _JACK_AVAILABLE = True
+except ImportError:
+    _JACK_AVAILABLE = False
+    logger.warning("JACK client library not available - handlers will use mock data")
 
-# Placeholder handlers - will be replaced with actual implementations
+# Global JACK client manager instance
+_jack_manager: Optional[JackClientManager] = None
+
+
+def _get_jack_manager() -> Optional[JackClientManager]:
+    """Get or create JACK client manager."""
+    global _jack_manager
+    if not _JACK_AVAILABLE:
+        return None
+    
+    if _jack_manager is None:
+        try:
+            _jack_manager = JackClientManager("skeleton_tools")
+            if not _jack_manager.is_connected():
+                _jack_manager.connect()
+        except Exception as e:
+            logger.error(f"Failed to initialize JACK manager: {e}")
+            return None
+    
+    return _jack_manager
+
+
 async def handle_jack_status() -> Dict[str, Any]:
     """Get current JACK status and active ports."""
-    return {
-        "status": "running",
-        "ports": [],
-        "connections": [],
-        "transport_state": "stopped"
-    }
+    jack_mgr = _get_jack_manager()
+    
+    if not jack_mgr:
+        return {
+            "status": "unavailable",
+            "ports": [],
+            "connections": {},
+            "transport_state": "unknown",
+            "error": "JACK client not available"
+        }
+    
+    try:
+        # Get all ports
+        output_ports = jack_mgr.get_ports(is_output=True, is_audio=True)
+        input_ports = jack_mgr.get_ports(is_input=True, is_audio=True)
+        
+        # Get connections
+        connections = jack_mgr.get_all_connections()
+        
+        # Get transport state
+        transport_state = jack_mgr.get_transport_state()
+        
+        return {
+            "status": "running",
+            "ports": {
+                "output": output_ports,
+                "input": input_ports,
+                "total": len(output_ports) + len(input_ports)
+            },
+            "connections": connections,
+            "transport_state": transport_state,
+            "sample_rate": jack_mgr.sample_rate,
+            "buffer_size": jack_mgr.buffer_size
+        }
+    except Exception as e:
+        logger.error(f"Error getting JACK status: {e}")
+        return {
+            "status": "error",
+            "ports": [],
+            "connections": {},
+            "transport_state": "unknown",
+            "error": str(e)
+        }
 
 
 async def handle_jack_transport_start() -> Dict[str, Any]:
     """Start JACK transport (play)."""
-    return {
-        "success": True,
-        "message": "JACK transport started"
-    }
+    jack_mgr = _get_jack_manager()
+    
+    if not jack_mgr:
+        return {
+            "success": False,
+            "error": "JACK client not available"
+        }
+    
+    try:
+        jack_mgr.transport_start()
+        return {
+            "success": True,
+            "message": "JACK transport started",
+            "state": jack_mgr.get_transport_state()
+        }
+    except Exception as e:
+        logger.error(f"Error starting JACK transport: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
 async def handle_jack_transport_stop() -> Dict[str, Any]:
     """Stop JACK transport."""
-    return {
-        "success": True,
-        "message": "JACK transport stopped"
-    }
+    jack_mgr = _get_jack_manager()
+    
+    if not jack_mgr:
+        return {
+            "success": False,
+            "error": "JACK client not available"
+        }
+    
+    try:
+        jack_mgr.transport_stop()
+        return {
+            "success": True,
+            "message": "JACK transport stopped",
+            "state": jack_mgr.get_transport_state()
+        }
+    except Exception as e:
+        logger.error(f"Error stopping JACK transport: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
 async def handle_record_start(
@@ -65,10 +164,41 @@ async def handle_list_jack_ports(
     port_type: str = "all"
 ) -> Dict[str, Any]:
     """List available JACK ports (audio, midi, all)."""
-    return {
-        "ports": [],
-        "port_type": port_type
-    }
+    jack_mgr = _get_jack_manager()
+    
+    if not jack_mgr:
+        return {
+            "ports": [],
+            "port_type": port_type,
+            "error": "JACK client not available"
+        }
+    
+    try:
+        is_audio = port_type in ("audio", "all")
+        is_midi = port_type in ("midi", "all")
+        
+        output_ports = jack_mgr.get_ports(is_output=True, is_audio=is_audio)
+        input_ports = jack_mgr.get_ports(is_input=True, is_audio=is_audio)
+        
+        # Get connections for each port
+        connections = jack_mgr.get_all_connections()
+        
+        return {
+            "ports": {
+                "output": output_ports,
+                "input": input_ports,
+                "total": len(output_ports) + len(input_ports)
+            },
+            "connections": connections,
+            "port_type": port_type
+        }
+    except Exception as e:
+        logger.error(f"Error listing JACK ports: {e}")
+        return {
+            "ports": [],
+            "port_type": port_type,
+            "error": str(e)
+        }
 
 
 async def handle_connect_jack_ports(
@@ -76,12 +206,32 @@ async def handle_connect_jack_ports(
     destination: str
 ) -> Dict[str, Any]:
     """Create a connection between two JACK ports."""
-    return {
-        "success": True,
-        "source": source,
-        "destination": destination,
-        "message": f"Connected {source} to {destination}"
-    }
+    jack_mgr = _get_jack_manager()
+    
+    if not jack_mgr:
+        return {
+            "success": False,
+            "source": source,
+            "destination": destination,
+            "error": "JACK client not available"
+        }
+    
+    try:
+        jack_mgr.connect_ports(source, destination)
+        return {
+            "success": True,
+            "source": source,
+            "destination": destination,
+            "message": f"Connected {source} to {destination}"
+        }
+    except Exception as e:
+        logger.error(f"Error connecting ports {source} to {destination}: {e}")
+        return {
+            "success": False,
+            "source": source,
+            "destination": destination,
+            "error": str(e)
+        }
 
 
 async def handle_disconnect_jack_ports(
@@ -89,12 +239,32 @@ async def handle_disconnect_jack_ports(
     destination: str
 ) -> Dict[str, Any]:
     """Disconnect two JACK ports."""
-    return {
-        "success": True,
-        "source": source,
-        "destination": destination,
-        "message": f"Disconnected {source} from {destination}"
-    }
+    jack_mgr = _get_jack_manager()
+    
+    if not jack_mgr:
+        return {
+            "success": False,
+            "source": source,
+            "destination": destination,
+            "error": "JACK client not available"
+        }
+    
+    try:
+        jack_mgr.disconnect_ports(source, destination)
+        return {
+            "success": True,
+            "source": source,
+            "destination": destination,
+            "message": f"Disconnected {source} from {destination}"
+        }
+    except Exception as e:
+        logger.error(f"Error disconnecting ports {source} from {destination}: {e}")
+        return {
+            "success": False,
+            "source": source,
+            "destination": destination,
+            "error": str(e)
+        }
 
 
 async def handle_get_node_status(
