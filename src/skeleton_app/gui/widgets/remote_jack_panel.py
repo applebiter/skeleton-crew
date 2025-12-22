@@ -222,38 +222,41 @@ class RemoteJackPanel(QWidget):
         self.connections.clear()
         
         # Parse port state from remote node
-        # Format: {ports: [{name, type, direction}, ...], connections: [{src, dst}, ...]}
-        ports = jack_state.get('ports', [])
-        connections = jack_state.get('connections', [])
+        # jack_state format: {status, ports: {output: [...], input: [...]}, connections: {...}, ...}
+        ports_dict = jack_state.get('ports', {})
+        output_ports = ports_dict.get('output', []) if isinstance(ports_dict, dict) else []
+        input_ports = ports_dict.get('input', []) if isinstance(ports_dict, dict) else []
         
-        # Build connection map
-        for conn in connections:
-            src = conn.get('source', '')
-            dst = conn.get('destination', '')
-            if src not in self.connections:
-                self.connections[src] = set()
-            self.connections[src].add(dst)
+        connections = jack_state.get('connections', {})
+        
+        # Build connection map from the connections dict
+        # Format: {source_port: [dest_port1, dest_port2, ...], ...}
+        for source_port, dest_ports in connections.items():
+            if source_port not in self.connections:
+                self.connections[source_port] = set()
+            if isinstance(dest_ports, list):
+                self.connections[source_port].update(dest_ports)
+            elif isinstance(dest_ports, str):
+                self.connections[source_port].add(dest_ports)
         
         # Add output ports (sources/capture)
-        for port in ports:
-            if port.get('direction') == 'out' or 'capture' in port.get('name', '').lower():
-                port_item = QTreeWidgetItem([port['name'], ''])
-                port_item.setData(0, Qt.UserRole, port['name'])
-                
-                # Add connections as children
-                if port['name'] in self.connections:
-                    for connected_to in self.connections[port['name']]:
-                        conn_item = QTreeWidgetItem([connected_to])
-                        port_item.addChild(conn_item)
-                
-                self.output_tree.addTopLevelItem(port_item)
+        for port_name in output_ports:
+            port_item = QTreeWidgetItem([port_name, ""])
+            port_item.setData(0, Qt.UserRole, port_name)
+            
+            # Show connections for this port
+            if port_name in self.connections:
+                for connected_port in self.connections[port_name]:
+                    conn_item = QTreeWidgetItem([connected_port])
+                    port_item.addChild(conn_item)
+            
+            self.output_tree.addTopLevelItem(port_item)
         
         # Add input ports (sinks/playback)
-        for port in ports:
-            if port.get('direction') == 'in' or 'playback' in port.get('name', '').lower():
-                port_item = QTreeWidgetItem([port['name']])
-                port_item.setData(0, Qt.UserRole, port['name'])
-                self.input_tree.addTopLevelItem(port_item)
+        for port_name in input_ports:
+            port_item = QTreeWidgetItem([port_name])
+            port_item.setData(0, Qt.UserRole, port_name)
+            self.input_tree.addTopLevelItem(port_item)
     
     def _on_selection_changed(self):
         """Update button states based on selection."""
