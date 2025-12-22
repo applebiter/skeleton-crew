@@ -163,10 +163,17 @@ class TransportAgent(QObject):
                     # Handle state - it might be an int or an enum
                     if hasattr(state, 'name'):
                         state_str = str(state.name).lower()
-                    else:
-                        # Map integer state to string
+                    elif hasattr(state, 'value'):
+                        # It's an enum with a value attribute
                         state_map = {0: 'stopped', 1: 'rolling', 2: 'starting'}
-                        state_str = state_map.get(int(state), 'unknown')
+                        state_str = state_map.get(state.value, 'unknown')
+                    elif isinstance(state, int):
+                        # It's already an integer
+                        state_map = {0: 'stopped', 1: 'rolling', 2: 'starting'}
+                        state_str = state_map.get(state, 'unknown')
+                    else:
+                        # Try to convert to string
+                        state_str = str(state).lower()
                     
                     current_state = {
                         "state": state_str,
@@ -242,10 +249,17 @@ class TransportAgent(QObject):
             # Handle state - it might be an int or an enum
             if hasattr(state, 'name'):
                 state_str = str(state.name).lower()
-            else:
-                # Map integer state to string
+            elif hasattr(state, 'value'):
+                # It's an enum with a value attribute
                 state_map = {0: 'stopped', 1: 'rolling', 2: 'starting'}
-                state_str = state_map.get(int(state), 'unknown')
+                state_str = state_map.get(state.value, 'unknown')
+            elif isinstance(state, int):
+                # It's already an integer
+                state_map = {0: 'stopped', 1: 'rolling', 2: 'starting'}
+                state_str = state_map.get(state, 'unknown')
+            else:
+                # Try to convert to string
+                state_str = str(state).lower()
             
             # Send reply if we have a coordinator to reply to
             if self.osc_client:
