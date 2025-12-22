@@ -548,15 +548,15 @@ class ServiceDiscovery:
                     continue
                 
                 # Mark services as unavailable if no heartbeat in 2x interval
-                timeout = timedelta(seconds=self.heartbeat_interval * 2)
+                timeout_seconds = self.heartbeat_interval * 2
                 
                 async with self.database.pool.acquire() as conn:
                     await conn.execute("""
                         UPDATE services
                         SET status = 'unavailable', updated_at = NOW()
-                        WHERE last_heartbeat < NOW() - $1
+                        WHERE last_heartbeat < NOW() - INTERVAL '1 second' * $1
                         AND status != 'unavailable'
-                    """, timeout)
+                    """, timeout_seconds)
                     
                     # Clean up old health history (keep last 1000 per service)
                     await conn.execute("""
