@@ -396,36 +396,53 @@ class MainWindow(QMainWindow):
     def _init_service_discovery(self):
         """Initialize service discovery asynchronously."""
         import asyncio
+        import threading
         
-        # Create event loop in separate thread if needed
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
+        def run_async_init():
+            """Run async init in a separate thread with its own event loop."""
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-        
-        async def _async_init():
-            # Initialize database
-            if self.config.database:
-                self.database = Database(self.config.database.url)
-                await self.database.connect()
-                await self.database.initialize_schema()
             
-            # Initialize service discovery
-            self.service_discovery = ServiceDiscovery(
-                node_id=self.config.node.id,
-                node_name=self.config.node.name,
-                node_host=self.config.node.host,
-                database=self.database,
-                heartbeat_interval=10
-            )
-            await self.service_discovery.start()
+            async def _async_init():
+                # Initialize database
+                if self.config.database:
+                    self.database = Database(self.config.database.url)
+                    await self.database.connect()
+                    await self.database.initialize_schema()
+                
+                # Initialize service discovery
+                self.service_discovery = ServiceDiscovery(
+                    node_id=self.config.node.id,
+                    node_name=self.config.node.name,
+                    node_host=self.config.node.host,
+                    database=self.database,
+                    heartbeat_interval=10
+                )
+                await self.service_discovery.start()
+                
+                # Update cluster panel (from main thread)
+                from PySide6.QtCore import QMetaObject, Qt
+                QMetaObject.invokeMethod(
+                    self.cluster_panel,
+                    "set_service_discovery",
+                    Qt.QueuedConnection,
+                    self.service_discovery
+                )
+                
+                logger.info(f"Service discovery started: {self.config.node.name} @ {self.config.node.host}")
             
-            # Update cluster panel
-            self.cluster_panel.set_service_discovery(self.service_discovery)
+            try:
+                loop.run_until_complete(_async_init())
+                # Keep loop running for async tasks
+                loop.run_forever()
+            except Exception as e:
+                logger.error(f"Service discovery init error: {e}")
+            finally:
+                loop.close()
         
-        # Run async initialization
-        asyncio.ensure_future(_async_init())
+        # Start in daemon thread
+        thread = threading.Thread(target=run_async_init, daemon=True)
+        thread.start()
     
     def _open_video(self):
         """Open video file via File menu."""
