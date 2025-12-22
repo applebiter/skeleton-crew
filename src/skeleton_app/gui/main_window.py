@@ -44,12 +44,16 @@ class MainWindow(QMainWindow):
     
     # Signals
     jack_status_changed = Signal(bool)  # Connected/disconnected
+    service_discovery_ready = Signal()  # Service discovery initialized
     
     def __init__(self, config: Config, config_path: Optional[Path] = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
         print(f"[DEBUG] MainWindow.__init__ starting with config: {config.node.name} @ {config.node.host}")
         self.config = config
         self.config_path = config_path or Path("config.yaml")
+        
+        # Connect service discovery signal
+        self.service_discovery_ready.connect(self._set_service_discovery)
         
         # JACK client manager
         self.jack_manager: Optional[JackClientManager] = None
@@ -442,11 +446,9 @@ class MainWindow(QMainWindow):
                     print("[DEBUG] Service discovery started!")
                     logger.info("Service discovery started!")
                     
-                    # Update cluster panel (from main thread)
-                    # We need to use QTimer to call this from the main thread safely
-                    from PySide6.QtCore import QTimer
-                    print("[DEBUG] Scheduling cluster panel update...")
-                    QTimer.singleShot(0, lambda: self._set_service_discovery())
+                    # Update cluster panel (from main thread) using signal
+                    print("[DEBUG] Emitting service_discovery_ready signal...")
+                    self.service_discovery_ready.emit()
                     
                     print(f"[DEBUG] Service discovery initialized: {self.config.node.name} @ {self.config.node.host}")
                     logger.info(f"Service discovery initialized: {self.config.node.name} @ {self.config.node.host}")
@@ -476,10 +478,14 @@ class MainWindow(QMainWindow):
     
     def _set_service_discovery(self):
         """Set service discovery on cluster panel (must be called from main thread)."""
+        print("[DEBUG] _set_service_discovery called")
         if self.service_discovery:
+            print(f"[DEBUG] Setting service discovery on cluster panel: {self.service_discovery}")
             logger.info("Setting service discovery on cluster panel")
             self.cluster_panel.set_service_discovery(self.service_discovery)
+            print("[DEBUG] Service discovery set on cluster panel successfully")
         else:
+            print("[DEBUG] Service discovery is None!")
             logger.warning("Service discovery not available when trying to set on cluster panel")
     
     def _open_video(self):

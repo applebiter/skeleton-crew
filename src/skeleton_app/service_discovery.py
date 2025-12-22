@@ -577,6 +577,8 @@ class ServiceDiscovery:
                 logger.error(f"Error in cleanup loop: {e}")    
     async def _broadcast_loop(self):
         """Broadcast node presence on LAN via UDP."""
+        print(f"[DEBUG] Starting UDP broadcast loop for {self.node_name} on port {self.broadcast_port}")
+        logger.info(f"Starting UDP broadcast loop for {self.node_name}")
         while self.running:
             try:
                 announcement = {
@@ -589,6 +591,7 @@ class ServiceDiscovery:
                 
                 message = json.dumps(announcement).encode('utf-8')
                 self.broadcast_socket.sendto(message, ('<broadcast>', self.broadcast_port))
+                print(f"[DEBUG] Broadcast sent: {self.node_name} @ {self.node_host}")
                 
                 # Broadcast every 5 seconds
                 await asyncio.sleep(5)
@@ -596,11 +599,14 @@ class ServiceDiscovery:
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                print(f"[DEBUG] Error in broadcast loop: {e}")
                 logger.error(f"Error in broadcast loop: {e}")
                 await asyncio.sleep(1)
     
     async def _listen_loop(self):
         """Listen for UDP broadcast announcements from other nodes."""
+        print(f"[DEBUG] Starting UDP listen loop on port {self.broadcast_port}")
+        logger.info(f"Starting UDP listen loop on port {self.broadcast_port}")
         while self.running:
             try:
                 # Non-blocking receive
@@ -610,19 +616,27 @@ class ServiceDiscovery:
                     lambda: self.listen_socket.recvfrom(4096)
                 )
                 
+                print(f"[DEBUG] Received UDP broadcast from {addr}: {data[:100]}")
+                
                 announcement = json.loads(data.decode('utf-8'))
                 node_id = announcement.get('node_id')
                 
+                print(f"[DEBUG] Parsed announcement: node_id={node_id}, node_name={announcement.get('node_name')}")
+                
                 # Ignore our own broadcasts
                 if node_id == self.node_id:
+                    print(f"[DEBUG] Ignoring own broadcast")
                     continue
                 
                 node_name = announcement.get('node_name')
                 node_host = announcement.get('host')
                 pub_port = announcement.get('pub_port', self.pub_port)
                 
+                print(f"[DEBUG] Processing node: {node_name} at {node_host}:{pub_port}")
+                
                 # Update known nodes
                 if node_id not in self.known_nodes:
+                    print(f"[DEBUG] NEW NODE DISCOVERED: {node_name} ({node_id}) at {node_host}")
                     logger.info(f"Discovered new node via UDP: {node_name} ({node_id}) at {node_host}")
                     
                     # Save to database if available
