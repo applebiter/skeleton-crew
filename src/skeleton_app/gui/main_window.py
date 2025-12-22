@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
     
     def __init__(self, config: Config, config_path: Optional[Path] = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        print(f"[DEBUG] MainWindow.__init__ starting with config: {config.node.name} @ {config.node.host}")
         self.config = config
         self.config_path = config_path or Path("config.yaml")
         
@@ -400,26 +401,32 @@ class MainWindow(QMainWindow):
         import asyncio
         import threading
         
+        print(f"[DEBUG] Starting service discovery initialization for {self.config.node.name}")
         logger.info(f"Starting service discovery initialization for {self.config.node.name}")
         
         def run_async_init():
             """Run async init in a separate thread with its own event loop."""
+            print("[DEBUG] In run_async_init thread")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
             async def _async_init():
                 try:
+                    print("[DEBUG] Async init starting...")
                     logger.info("Async init starting...")
                     
                     # Initialize database
                     if self.config.database:
+                        print("[DEBUG] Connecting to database...")
                         logger.info("Connecting to database...")
                         self.database = Database(self.config.database.url)
                         await self.database.connect()
                         await self.database.initialize_schema()
+                        print("[DEBUG] Database connected")
                         logger.info("Database connected")
                     
                     # Initialize service discovery
+                    print(f"[DEBUG] Creating ServiceDiscovery: {self.config.node.name} @ {self.config.node.host}")
                     logger.info(f"Creating ServiceDiscovery: {self.config.node.name} @ {self.config.node.host}")
                     self.service_discovery = ServiceDiscovery(
                         node_id=self.config.node.id,
@@ -429,32 +436,42 @@ class MainWindow(QMainWindow):
                         heartbeat_interval=10
                     )
                     
+                    print("[DEBUG] Starting service discovery...")
                     logger.info("Starting service discovery...")
                     await self.service_discovery.start()
+                    print("[DEBUG] Service discovery started!")
                     logger.info("Service discovery started!")
                     
                     # Update cluster panel (from main thread)
                     # We need to use QTimer to call this from the main thread safely
                     from PySide6.QtCore import QTimer
+                    print("[DEBUG] Scheduling cluster panel update...")
                     QTimer.singleShot(0, lambda: self._set_service_discovery())
                     
+                    print(f"[DEBUG] Service discovery initialized: {self.config.node.name} @ {self.config.node.host}")
                     logger.info(f"Service discovery initialized: {self.config.node.name} @ {self.config.node.host}")
                     
                 except Exception as e:
+                    print(f"[DEBUG] Error in async init: {e}")
                     logger.error(f"Error in async init: {e}", exc_info=True)
             
             try:
+                print("[DEBUG] Running async init...")
                 loop.run_until_complete(_async_init())
+                print("[DEBUG] Async init complete, keeping loop running...")
                 # Keep loop running for async tasks
                 loop.run_forever()
             except Exception as e:
+                print(f"[DEBUG] Service discovery init error: {e}")
                 logger.error(f"Service discovery init error: {e}", exc_info=True)
             finally:
                 loop.close()
         
         # Start in daemon thread
+        print("[DEBUG] Creating daemon thread...")
         thread = threading.Thread(target=run_async_init, daemon=True)
         thread.start()
+        print("[DEBUG] Service discovery thread started")
         logger.info("Service discovery thread started")
     
     def _set_service_discovery(self):
