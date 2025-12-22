@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer, Signal
 
 from skeleton_app.providers.tools import ToolRegistry
-from skeleton_app.gui.async_task import run_async
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +51,8 @@ class RemoteJackPanel(QWidget):
         self._auto_refresh_enabled = False
     
     def _on_update_timer(self):
-        """Timer callback - run async update in separate thread."""
-        run_async(self._update_ports())
+        """Timer callback - update ports on main thread (JACK is not thread-safe)."""
+        self._sync_update_ports()
     
     def _setup_ui(self):
         """Setup the UI."""
@@ -177,8 +176,17 @@ class RemoteJackPanel(QWidget):
         self.title_label.setText(f"Remote JACK Patchbay - {node_name}")
         self.node_changed.emit(node_id)
         
-        # Fetch this node's JACK state (run async in background thread)
-        run_async(self._update_ports())
+        # Fetch this node's JACK state (run synchronously - JACK is not thread-safe)
+        import asyncio
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self._update_ports())
+            loop.close()
+        except Exception as e:
+            logger.error(f"Error updating ports: {e}")
+            self.status_label.setText(f"Error: {e}")
+            self.status_label.setStyleSheet("color: red;")
     
     async def _update_ports(self):
         """Fetch and update port list from remote node."""
@@ -256,17 +264,54 @@ class RemoteJackPanel(QWidget):
         self.connect_button.setEnabled(output_selected and input_selected)
         self.disconnect_button.setEnabled(output_selected or input_selected)
     
+    def _sync_update_ports(self):
+        """Synchronously update ports (JACK must be called from main thread)."""
+        import asyncio
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self._update_ports())
+            loop.close()
+        except Exception as e:
+            logger.error(f"Failed to update ports: {e}")
+            self.status_label.setText(f"Error: {e}")
+            self.status_label.setStyleSheet("color: red;")
+    
+    def _sync_connect_selected(self):
+        """Synchronously connect selected ports."""
+        import asyncio
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self._connect_selected())
+            loop.close()
+        except Exception as e:
+            logger.error(f"Connection failed: {e}")
+            QMessageBox.critical(self, "Connection Error", str(e))
+    
+    def _sync_disconnect_selected(self):
+        """Synchronously disconnect selected ports."""
+        import asyncio
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self._disconnect_selected())
+            loop.close()
+        except Exception as e:
+            logger.error(f"Disconnection failed: {e}")
+            QMessageBox.critical(self, "Disconnection Error", str(e))
+    
     def _on_refresh_clicked(self):
-        """Refresh button clicked - run async update."""
-        run_async(self._update_ports())
+        """Refresh button clicked - update ports on main thread."""
+        self._sync_update_ports()
     
     def _on_connect_clicked(self):
-        """Connect button clicked - run async connection."""
-        run_async(self._connect_selected())
+        """Connect button clicked - connect ports on main thread."""
+        self._sync_connect_selected()
     
     def _on_disconnect_clicked(self):
-        """Disconnect button clicked - run async disconnection."""
-        run_async(self._disconnect_selected())
+        """Disconnect button clicked - disconnect ports on main thread."""
+        self._sync_disconnect_selected()
     
     async def _connect_selected(self):
         """Connect selected output port to selected input port on remote node."""
