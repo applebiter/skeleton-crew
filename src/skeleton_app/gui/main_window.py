@@ -399,47 +399,70 @@ class MainWindow(QMainWindow):
         import asyncio
         import threading
         
+        logger.info(f"Starting service discovery initialization for {self.config.node.name}")
+        
         def run_async_init():
             """Run async init in a separate thread with its own event loop."""
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
             async def _async_init():
-                # Initialize database
-                if self.config.database:
-                    self.database = Database(self.config.database.url)
-                    await self.database.connect()
-                    await self.database.initialize_schema()
-                
-                # Initialize service discovery
-                self.service_discovery = ServiceDiscovery(
-                    node_id=self.config.node.id,
-                    node_name=self.config.node.name,
-                    node_host=self.config.node.host,
-                    database=self.database,
-                    heartbeat_interval=10
-                )
-                await self.service_discovery.start()
-                
-                # Update cluster panel (from main thread)
-                # We need to use QTimer to call this from the main thread safely
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self.cluster_panel.set_service_discovery(self.service_discovery))
-                
-                logger.info(f"Service discovery started: {self.config.node.name} @ {self.config.node.host}")
+                try:
+                    logger.info("Async init starting...")
+                    
+                    # Initialize database
+                    if self.config.database:
+                        logger.info("Connecting to database...")
+                        self.database = Database(self.config.database.url)
+                        await self.database.connect()
+                        await self.database.initialize_schema()
+                        logger.info("Database connected")
+                    
+                    # Initialize service discovery
+                    logger.info(f"Creating ServiceDiscovery: {self.config.node.name} @ {self.config.node.host}")
+                    self.service_discovery = ServiceDiscovery(
+                        node_id=self.config.node.id,
+                        node_name=self.config.node.name,
+                        node_host=self.config.node.host,
+                        database=self.database,
+                        heartbeat_interval=10
+                    )
+                    
+                    logger.info("Starting service discovery...")
+                    await self.service_discovery.start()
+                    logger.info("Service discovery started!")
+                    
+                    # Update cluster panel (from main thread)
+                    # We need to use QTimer to call this from the main thread safely
+                    from PySide6.QtCore import QTimer
+                    QTimer.singleShot(0, lambda: self._set_service_discovery())
+                    
+                    logger.info(f"Service discovery initialized: {self.config.node.name} @ {self.config.node.host}")
+                    
+                except Exception as e:
+                    logger.error(f"Error in async init: {e}", exc_info=True)
             
             try:
                 loop.run_until_complete(_async_init())
                 # Keep loop running for async tasks
                 loop.run_forever()
             except Exception as e:
-                logger.error(f"Service discovery init error: {e}")
+                logger.error(f"Service discovery init error: {e}", exc_info=True)
             finally:
                 loop.close()
         
         # Start in daemon thread
         thread = threading.Thread(target=run_async_init, daemon=True)
         thread.start()
+        logger.info("Service discovery thread started")
+    
+    def _set_service_discovery(self):
+        """Set service discovery on cluster panel (must be called from main thread)."""
+        if self.service_discovery:
+            logger.info("Setting service discovery on cluster panel")
+            self.cluster_panel.set_service_discovery(self.service_discovery)
+        else:
+            logger.warning("Service discovery not available when trying to set on cluster panel")
     
     def _open_video(self):
         """Open video file via File menu."""
