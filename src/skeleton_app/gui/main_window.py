@@ -2,6 +2,7 @@
 Main application window for skeleton-app.
 """
 
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -28,7 +29,7 @@ from skeleton_app.audio.jack_client import JackClientManager
 from skeleton_app.audio.qt_video_player import QtVideoPlayerManager
 from skeleton_app.audio.transport_services import TransportAgentService, TransportCoordinatorService
 
-
+logger = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     """
     Main application window.
