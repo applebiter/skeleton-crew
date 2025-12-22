@@ -1,6 +1,6 @@
-# Skeleton App
+# Skeleton Crew
 
-A distributed, JACK-centric voice/agent system for Linux audio workstations.
+A distributed, JACK-centric voice/agent system for Linux audio workstations. Manage a network of JACK systems from a single machine - like running a ship with a skeleton crew.
 
 ## Features
 
