@@ -44,9 +44,10 @@ class MainWindow(QMainWindow):
     # Signals
     jack_status_changed = Signal(bool)  # Connected/disconnected
     
-    def __init__(self, config: Config, parent: Optional[QWidget] = None):
+    def __init__(self, config: Config, config_path: Optional[Path] = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.config = config
+        self.config_path = config_path or Path("config.yaml")
         
         # JACK client manager
         self.jack_manager: Optional[JackClientManager] = None
@@ -433,7 +434,7 @@ class MainWindow(QMainWindow):
     
     def _show_settings(self):
         """Show settings dialog."""
-        dialog = SettingsDialog(self.config, self)
+        dialog = SettingsDialog(self.config, self.config_path, self)
         dialog.exec()
     
     def _show_about(self):

@@ -33,7 +33,7 @@ def main():
         config = Config()
     
     # Create and show main window
-    window = MainWindow(config)
+    window = MainWindow(config, config_path)
     window.show()
     
     sys.exit(app.exec())

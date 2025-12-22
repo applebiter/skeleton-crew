@@ -2,7 +2,9 @@
 Settings dialog for configuring node and database settings.
 """
 
+from pathlib import Path
 from typing import Optional
+import yaml
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -25,9 +27,10 @@ class SettingsDialog(QDialog):
     - Service discovery ports
     """
     
-    def __init__(self, config: Config, parent: Optional[QWidget] = None):
+    def __init__(self, config: Config, config_path: Optional[Path] = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.config = config
+        self.config_path = config_path or Path("config.yaml")
         self.original_config = config.model_copy(deep=True)
         
         self.setWindowTitle("Settings")
@@ -224,13 +227,14 @@ class SettingsDialog(QDialog):
         """Apply settings without closing dialog."""
         self._save_config()
         
-        QMessageBox.information(
-            self,
-            "Settings Applied",
-            "Settings have been updated in memory.\n\n"
-            "Note: Some changes (like network settings) require\n"
-            "restarting the application to take effect."
-        )
+        if self._save_to_yaml():
+            QMessageBox.information(
+                self,
+                "Settings Applied",
+                f"Settings have been saved to {self.config_path}\n\n"
+                "Some changes (like network settings) require\n"
+                "restarting the application to take effect."
+            )
     
     def _save_config(self):
         """Save settings to config object."""
@@ -252,20 +256,63 @@ class SettingsDialog(QDialog):
         else:
             self.config.database = None
     
+    def _save_to_yaml(self) -> bool:
+        """Save config to YAML file. Returns True if successful."""
+        try:
+            # Read existing YAML file
+            if self.config_path.exists():
+                with open(self.config_path, 'r') as f:
+                    yaml_data = yaml.safe_load(f)
+            else:
+                yaml_data = {}
+            
+            # Update node settings
+            if 'node' not in yaml_data:
+                yaml_data['node'] = {}
+            
+            yaml_data['node']['name'] = self.config.node.name
+            yaml_data['node']['host'] = self.config.node.host
+            yaml_data['node']['port'] = self.config.node.port
+            
+            # Update database settings
+            if self.config.database and self.config.database.url:
+                if 'database' not in yaml_data:
+                    yaml_data['database'] = {}
+                yaml_data['database']['url'] = self.config.database.url
+            else:
+                # Remove database section if disabled
+                if 'database' in yaml_data:
+                    del yaml_data['database']
+            
+            # Write back to file
+            with open(self.config_path, 'w') as f:
+                yaml.dump(yaml_data, f, default_flow_style=False, sort_keys=False)
+            
+            return True
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Save Error",
+                f"Failed to save settings to {self.config_path}:\n\n{str(e)}"
+            )
+            return False
+    
     def accept(self):
         """Accept and save settings."""
         self._save_config()
         
-        # TODO: Save to config.yaml file
-        QMessageBox.information(
-            self,
-            "Settings Saved",
-            "Settings have been updated.\n\n"
-            "Note: Changes are in memory only and will be lost on restart.\n"
-            "To persist changes, manually edit config.yaml."
-        )
-        
-        super().accept()
+        # Save to YAML file
+        if self._save_to_yaml():
+            QMessageBox.information(
+                self,
+                "Settings Saved",
+                f"Settings have been saved to {self.config_path}\n\n"
+                "Some changes (like network settings) require\n"
+                "restarting the application to take effect."
+            )
+            super().accept()
+        # If save failed, don't close dialog
     
     def reject(self):
         """Cancel and restore original settings."""
