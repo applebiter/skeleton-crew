@@ -5,7 +5,6 @@ Provides identical interface to local patchbay but executes operations
 on remote machines via tool registry over ZeroMQ.
 """
 
-import asyncio
 import logging
 from typing import Optional, Dict, Set
 
@@ -17,6 +16,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer, Signal
 
 from skeleton_app.providers.tools import ToolRegistry
+from skeleton_app.gui.async_task import run_async
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +52,8 @@ class RemoteJackPanel(QWidget):
         self._auto_refresh_enabled = False
     
     def _on_update_timer(self):
-        """Timer callback - run async update in event loop."""
-        asyncio.create_task(self._update_ports())
+        """Timer callback - run async update in separate thread."""
+        run_async(self._update_ports())
     
     def _setup_ui(self):
         """Setup the UI."""
@@ -177,8 +177,8 @@ class RemoteJackPanel(QWidget):
         self.title_label.setText(f"Remote JACK Patchbay - {node_name}")
         self.node_changed.emit(node_id)
         
-        # Fetch this node's JACK state (run async in event loop)
-        asyncio.create_task(self._update_ports())
+        # Fetch this node's JACK state (run async in background thread)
+        run_async(self._update_ports())
     
     async def _update_ports(self):
         """Fetch and update port list from remote node."""
@@ -258,15 +258,15 @@ class RemoteJackPanel(QWidget):
     
     def _on_refresh_clicked(self):
         """Refresh button clicked - run async update."""
-        asyncio.create_task(self._update_ports())
+        run_async(self._update_ports())
     
     def _on_connect_clicked(self):
         """Connect button clicked - run async connection."""
-        asyncio.create_task(self._connect_selected())
+        run_async(self._connect_selected())
     
     def _on_disconnect_clicked(self):
         """Disconnect button clicked - run async disconnection."""
-        asyncio.create_task(self._disconnect_selected())
+        run_async(self._disconnect_selected())
     
     async def _connect_selected(self):
         """Connect selected output port to selected input port on remote node."""
