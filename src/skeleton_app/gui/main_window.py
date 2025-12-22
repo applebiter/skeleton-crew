@@ -23,6 +23,7 @@ from skeleton_app.gui.widgets.node_canvas_v3 import NodeCanvasWidget
 from skeleton_app.gui.widgets.video_panel import VideoPanel
 from skeleton_app.gui.widgets.transcode_panel import TranscodePanel
 from skeleton_app.gui.widgets.transport_nodes import TransportAgentNodeWidget, TransportCoordinatorNodeWidget
+from skeleton_app.gui.widgets.settings_dialog import SettingsDialog
 from skeleton_app.audio.jack_client import JackClientManager
 from skeleton_app.audio.qt_video_player import QtVideoPlayerManager
 from skeleton_app.audio.transport_services import TransportAgentService, TransportCoordinatorService
@@ -127,6 +128,11 @@ class MainWindow(QMainWindow):
         self.view_transport_action.setCheckable(True)
         self.view_transport_action.setChecked(True)
         
+        # Tools menu actions
+        self.settings_action = QAction("&Settings...", self)
+        self.settings_action.setShortcut("Ctrl+,")
+        self.settings_action.triggered.connect(self._show_settings)
+        
         # Help menu actions
         self.about_action = QAction("&About", self)
         self.about_action.triggered.connect(self._show_about)
@@ -153,6 +159,10 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.view_video_action)
         view_menu.addAction(self.view_transcode_action)
         view_menu.addAction(self.view_transport_action)
+        
+        # Tools menu
+        tools_menu = menubar.addMenu("&Tools")
+        tools_menu.addAction(self.settings_action)
         
         # Help menu
         help_menu = menubar.addMenu("&Help")
@@ -418,6 +428,11 @@ class MainWindow(QMainWindow):
         """Open video file via File menu."""
         # Delegate to video panel
         self.video_panel._on_open_video()
+    
+    def _show_settings(self):
+        """Show settings dialog."""
+        dialog = SettingsDialog(self.config, self)
+        dialog.exec()
     
     def _show_about(self):
         """Show about dialog."""
