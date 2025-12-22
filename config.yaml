@@ -123,7 +123,7 @@ commands:
     - weather forecast
     handler: builtin.weather
 database:
-  url: postgresql://sysadmin:nx8J33aY@karate:5432/skeleton_crew
+  url: ""
   pool_size: 5
   max_overflow: 10
 network:
