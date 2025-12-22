@@ -718,9 +718,9 @@ class ServiceDiscovery:
                     node_name,
                     node_host,
                     self.pub_port,
-                    [],  # roles will be updated via service announcements
-                    [],
-                    [],
+                    [],  # roles - PostgreSQL TEXT[] (will be updated via service announcements)
+                    {},  # capabilities - JSONB (needs to be dict, not list)
+                    {},  # tags - JSONB (needs to be dict, not list)
                     "online"
                 )
         except Exception as e:
