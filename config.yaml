@@ -60,40 +60,27 @@ voice_commands:
     description: Connect JACK audio ports
   sample_rate: 22050
 llm:
-  providers:
-  - name: ollama
-    type: ollama
+  ollama:
+    enabled: true
     base_url: http://localhost:11434
     models:
-      chat: granite4:3b
-      planning: granite4:3b
-      vision: ministral-3:3b
-      embedding: nomic-embed-text
-    enabled: true
-  - name: openai
-    type: openai
-    models:
-      chat: gpt-4o-mini
-      embedding: text-embedding-3-small
-    enabled: true
-    requires_key: true
-  - name: anthropic
-    type: anthropic
-    models:
-      chat: claude-3-5-sonnet-20241022
-    enabled: true
-    requires_key: true
-  defaults:
-    chat: ollama:granite4:3b
-    planning: ollama:granite4:3b
-    vision: ollama:ministral-3:3b
-    embedding: ollama:nomic-embed-text
-  tools:
-    enabled: true
-    max_iterations: 20
+    - name: granite4:3b
+      capabilities:
+      - chat
+      - planning
+      is_default: true
+    - name: ministral-3:3b
+      capabilities:
+      - vision
+    - name: nomic-embed-text
+      capabilities:
+      - embedding
+  cloud_providers: []
   max_context_length: 2048
   max_history_messages: 10
   max_iterations: 20
+  tools_enabled: true
+  tools_max_iterations: 20
 audio:
   jack:
     client_name: skeleton_app

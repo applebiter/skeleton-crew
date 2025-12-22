@@ -52,24 +52,50 @@ class TTSConfig(BaseModel):
     piper: PiperConfig = Field(default_factory=PiperConfig)
 
 
-class LLMProviderConfig(BaseModel):
-    """LLM provider configuration."""
+class OllamaModelConfig(BaseModel):
+    """Local Ollama model configuration."""
     
     name: str
+    capabilities: List[str] = Field(default_factory=list)  # chat, planning, vision, embedding
+    is_default: bool = False
+
+
+class OllamaConfig(BaseModel):
+    """Local Ollama configuration (primary LLM backend)."""
+    
+    enabled: bool = True
+    base_url: str = "http://localhost:11434"
+    models: List[OllamaModelConfig] = Field(default_factory=list)
+
+
+class CloudLLMProviderConfig(BaseModel):
+    """Cloud LLM provider (optional, requires API key)."""
+    
+    name: str  # openai, anthropic, google
     type: str
     base_url: Optional[str] = None
-    models: Dict[str, str] = Field(default_factory=dict)
-    enabled: bool = True
-    requires_key: bool = False
+    models: Dict[str, str] = Field(default_factory=dict)  # capability -> model_id
+    enabled: bool = False  # Cloud disabled by default
+    requires_key: bool = True
 
 
 class LLMConfig(BaseModel):
-    """LLM configuration."""
+    """LLM configuration - local-first with optional cloud fallback."""
     
-    providers: List[LLMProviderConfig] = Field(default_factory=list)
-    defaults: Dict[str, str] = Field(default_factory=dict)
-    max_context_length: int = 4096
-    max_history_messages: int = 20
+    # Primary: Always-available local LLM
+    ollama: OllamaConfig = Field(default_factory=OllamaConfig)
+    
+    # Optional: Cloud providers (must be explicitly enabled)
+    cloud_providers: List[CloudLLMProviderConfig] = Field(default_factory=list)
+    
+    # Context settings
+    max_context_length: int = 2048
+    max_history_messages: int = 10
+    max_iterations: int = 20
+    
+    # Tools
+    tools_enabled: bool = True
+    tools_max_iterations: int = 20
 
 
 class JACKConfig(BaseModel):
