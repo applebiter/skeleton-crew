@@ -93,6 +93,9 @@ class ClusterPanel(QWidget):
         
         self.service_tree.clear()
         
+        # Get all known nodes (including those discovered via UDP)
+        known_nodes = self.service_discovery.get_known_nodes()
+        
         # Get all services grouped by node
         all_services = self.service_discovery.get_all_services()
         
@@ -100,15 +103,26 @@ class ClusterPanel(QWidget):
         healthy_services = 0
         service_types_count: Dict[ServiceType, int] = {}
         
-        # Group services by node
+        # First, add nodes with services
+        nodes_with_services = set()
         for node_id, services in all_services.items():
             if not services:
                 continue
             
+            nodes_with_services.add(node_id)
+            
+            # Find node name from known_nodes
+            node_name = node_id
+            for node in known_nodes:
+                if node['node_id'] == node_id:
+                    node_name = node['node_name']
+                    break
+            
             # Create node item
-            node_item = QTreeWidgetItem([node_id, "", ""])
+            node_item = QTreeWidgetItem([f"{node_name} ({node_id[:8]}...)", "", "Online"])
             node_item.setExpanded(True)
             node_item.setForeground(0, Qt.white)
+            node_item.setForeground(2, Qt.green)
             
             # Add services under node
             for service in services:
@@ -157,8 +171,21 @@ class ClusterPanel(QWidget):
             
             self.service_tree.addTopLevelItem(node_item)
         
+        # Add discovered nodes without services yet
+        for node in known_nodes:
+            if node['node_id'] not in nodes_with_services and node['node_id'] != self.service_discovery.node_id:
+                node_item = QTreeWidgetItem([
+                    f"{node['node_name']} ({node['node_id'][:8]}...)",
+                    "",
+                    "Discovered (no services)"
+                ])
+                node_item.setForeground(0, Qt.gray)
+                node_item.setForeground(2, Qt.yellow)
+                node_item.setToolTip(0, f"Node: {node['node_name']}\nHost: {node['host']}\nPort: {node['port']}")
+                self.service_tree.addTopLevelItem(node_item)
+        
         # Update stats
-        stats_text = f"Nodes: {len(all_services)}\n"
+        stats_text = f"Nodes: {len(known_nodes)} discovered, {len(all_services)} with services\n"
         stats_text += f"Services: {total_services} total, {healthy_services} healthy\n\n"
         stats_text += "By Type:\n"
         for service_type, count in sorted(service_types_count.items(), key=lambda x: -x[1]):

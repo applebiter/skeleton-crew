@@ -10,9 +10,11 @@ import asyncio
 import json
 import logging
 import socket
+import struct
+import time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Set
 from enum import Enum
 
 import zmq
@@ -100,30 +102,45 @@ class ServiceInfo:
 
 class ServiceDiscovery:
     """
-    Hybrid service discovery using ZeroMQ and PostgreSQL.
+    Hybrid service discovery using UDP broadcast, ZeroMQ, and PostgreSQL.
     
-    - ZeroMQ pub/sub for real-time announcements
-    - PostgreSQL for persistent registry
+    - UDP broadcast for automatic node discovery on LAN
+    - ZeroMQ pub/sub for real-time service announcements
+    - PostgreSQL for persistent registry (optional)
     """
     
     def __init__(
         self,
         node_id: str,
-        database: Database,
+        node_name: str,
+        node_host: str,
+        database: Optional[Database] = None,
         pub_port: int = 5555,
         sub_port: int = 5556,
+        broadcast_port: int = 5557,
         heartbeat_interval: int = 10
     ):
         self.node_id = node_id
+        self.node_name = node_name
+        self.node_host = node_host
         self.database = database
         self.pub_port = pub_port
         self.sub_port = sub_port
+        self.broadcast_port = broadcast_port
         self.heartbeat_interval = heartbeat_interval
         
         # ZeroMQ context
         self.zmq_context = zmq.asyncio.Context()
         self.publisher: Optional[zmq.asyncio.Socket] = None
         self.subscriber: Optional[zmq.asyncio.Socket] = None
+        
+        # UDP broadcast socket
+        self.broadcast_socket: Optional[socket.socket] = None
+        self.listen_socket: Optional[socket.socket] = None
+        
+        # Known nodes (discovered via UDP or database)
+        self.known_nodes: Dict[str, Dict] = {}  # node_id -> {name, host, last_seen}
+        self.subscribed_nodes: Set[str] = set()  # Track which nodes we've subscribed to
         
         # Local service registry
         self.local_services: Dict[str, ServiceInfo] = {}
@@ -141,6 +158,8 @@ class ServiceDiscovery:
         self.heartbeat_task: Optional[asyncio.Task] = None
         self.subscriber_task: Optional[asyncio.Task] = None
         self.cleanup_task: Optional[asyncio.Task] = None
+        self.broadcast_task: Optional[asyncio.Task] = None
+        self.listen_task: Optional[asyncio.Task] = None
     
     async def start(self):
         """Start service discovery."""
@@ -149,19 +168,21 @@ class ServiceDiscovery:
         
         logger.info(f"Starting service discovery for node {self.node_id}")
         
+        # Setup UDP broadcast listener
+        self._setup_udp_sockets()
+        
         # Setup ZeroMQ publisher
         self.publisher = self.zmq_context.socket(zmq.PUB)
         self.publisher.bind(f"tcp://*:{self.pub_port}")
         
-        # Setup ZeroMQ subscriber (connect to all other nodes)
+        # Setup ZeroMQ subscriber (will connect to nodes as discovered)
         self.subscriber = self.zmq_context.socket(zmq.SUB)
         self.subscriber.setsockopt_string(zmq.SUBSCRIBE, "")
         
-        # Load known nodes from database and subscribe to them
-        await self._subscribe_to_cluster()
-        
-        # Load existing services from database
-        await self._load_services_from_db()
+        # Load known nodes from database if available
+        if self.database and self.database.pool:
+            await self._subscribe_to_cluster()
+            await self._load_services_from_db()
         
         self.running = True
         
@@ -169,8 +190,24 @@ class ServiceDiscovery:
         self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         self.subscriber_task = asyncio.create_task(self._subscription_loop())
         self.cleanup_task = asyncio.create_task(self._cleanup_loop())
+        self.broadcast_task = asyncio.create_task(self._broadcast_loop())
+        self.listen_task = asyncio.create_task(self._listen_loop())
         
-        logger.info("Service discovery started")
+        logger.info("Service discovery started with UDP broadcast enabled")
+    
+    def _setup_udp_sockets(self):
+        """Setup UDP sockets for broadcast discovery."""
+        # Broadcast socket (send)
+        self.broadcast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        
+        # Listen socket (receive)
+        self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.listen_socket.bind(('', self.broadcast_port))
+        self.listen_socket.setblocking(False)
+        
+        logger.info(f"UDP broadcast sockets setup on port {self.broadcast_port}")
     
     async def stop(self):
         """Stop service discovery."""
@@ -187,6 +224,10 @@ class ServiceDiscovery:
             self.subscriber_task.cancel()
         if self.cleanup_task:
             self.cleanup_task.cancel()
+        if self.broadcast_task:
+            self.broadcast_task.cancel()
+        if self.listen_task:
+            self.listen_task.cancel()
         
         # Mark our services as unavailable
         for service_name in self.local_services:
@@ -197,6 +238,12 @@ class ServiceDiscovery:
             self.publisher.close()
         if self.subscriber:
             self.subscriber.close()
+        
+        # Close UDP sockets
+        if self.broadcast_socket:
+            self.broadcast_socket.close()
+        if self.listen_socket:
+            self.listen_socket.close()
         
         logger.info("Service discovery stopped")
     
@@ -527,4 +574,138 @@ class ServiceDiscovery:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in cleanup loop: {e}")
+                logger.error(f"Error in cleanup loop: {e}")    
+    async def _broadcast_loop(self):
+        """Broadcast node presence on LAN via UDP."""
+        while self.running:
+            try:
+                announcement = {
+                    'node_id': self.node_id,
+                    'node_name': self.node_name,
+                    'host': self.node_host,
+                    'pub_port': self.pub_port,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                message = json.dumps(announcement).encode('utf-8')
+                self.broadcast_socket.sendto(message, ('<broadcast>', self.broadcast_port))
+                
+                # Broadcast every 5 seconds
+                await asyncio.sleep(5)
+            
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in broadcast loop: {e}")
+                await asyncio.sleep(1)
+    
+    async def _listen_loop(self):
+        """Listen for UDP broadcast announcements from other nodes."""
+        while self.running:
+            try:
+                # Non-blocking receive
+                loop = asyncio.get_event_loop()
+                data, addr = await loop.run_in_executor(
+                    None, 
+                    lambda: self.listen_socket.recvfrom(4096)
+                )
+                
+                announcement = json.loads(data.decode('utf-8'))
+                node_id = announcement.get('node_id')
+                
+                # Ignore our own broadcasts
+                if node_id == self.node_id:
+                    continue
+                
+                node_name = announcement.get('node_name')
+                node_host = announcement.get('host')
+                pub_port = announcement.get('pub_port', self.pub_port)
+                
+                # Update known nodes
+                if node_id not in self.known_nodes:
+                    logger.info(f"Discovered new node via UDP: {node_name} ({node_id}) at {node_host}")
+                    
+                    # Save to database if available
+                    if self.database and self.database.pool:
+                        await self._save_discovered_node(node_id, node_name, node_host)
+                
+                self.known_nodes[node_id] = {
+                    'name': node_name,
+                    'host': node_host,
+                    'port': pub_port,
+                    'last_seen': time.time()
+                }
+                
+                # Subscribe to this node's ZeroMQ publisher if not already subscribed
+                if node_id not in self.subscribed_nodes:
+                    zmq_endpoint = f"tcp://{node_host}:{pub_port}"
+                    self.subscriber.connect(zmq_endpoint)
+                    self.subscribed_nodes.add(node_id)
+                    logger.info(f"Subscribed to ZeroMQ from {node_name} at {zmq_endpoint}")
+                    
+                    # Notify callbacks about new node
+                    for callback in self.callbacks:
+                        try:
+                            if asyncio.iscoroutinefunction(callback):
+                                await callback("node_discovered", {
+                                    'node_id': node_id,
+                                    'node_name': node_name,
+                                    'host': node_host
+                                })
+                            else:
+                                callback("node_discovered", {
+                                    'node_id': node_id,
+                                    'node_name': node_name,
+                                    'host': node_host
+                                })
+                        except Exception as e:
+                            logger.error(f"Error in node discovery callback: {e}")
+            
+            except asyncio.CancelledError:
+                break
+            except socket.error:
+                # No data available, wait a bit
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                logger.error(f"Error in listen loop: {e}")
+                await asyncio.sleep(1)
+    
+    async def _save_discovered_node(self, node_id: str, node_name: str, node_host: str):
+        """Save a discovered node to the database."""
+        try:
+            async with self.database.pool.acquire() as conn:
+                await conn.execute("""
+                    INSERT INTO nodes (id, name, host, port, roles, capabilities, tags, status, last_seen)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+                    ON CONFLICT (id)
+                    DO UPDATE SET
+                        name = EXCLUDED.name,
+                        host = EXCLUDED.host,
+                        status = 'online',
+                        last_seen = NOW(),
+                        updated_at = NOW()
+                """, 
+                    node_id,
+                    node_name,
+                    node_host,
+                    self.pub_port,
+                    [],  # roles will be updated via service announcements
+                    [],
+                    [],
+                    "online"
+                )
+        except Exception as e:
+            logger.error(f"Error saving discovered node to database: {e}")
+    
+    def get_known_nodes(self) -> List[Dict]:
+        """Get list of all known nodes."""
+        return [
+            {
+                'node_id': node_id,
+                'node_name': info['name'],
+                'host': info['host'],
+                'port': info['port'],
+                'last_seen': info['last_seen']
+            }
+            for node_id, info in self.known_nodes.items()
+        ]

@@ -43,6 +43,8 @@ class SkeletonDaemon:
         # Initialize service discovery
         self.service_discovery = ServiceDiscovery(
             node_id=self.config.node.id,
+            node_name=self.config.node.name,
+            node_host=self.config.node.host,
             database=self.database,
             heartbeat_interval=10
         )
