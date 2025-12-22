@@ -104,6 +104,25 @@ class WakewordConfig(BaseModel):
     timeout: float = 5.0
 
 
+class CommandAlias(BaseModel):
+    """Command alias configuration."""
+    
+    alias: str
+    actual_command: str
+    node_id: Optional[str] = None
+    description: str = ""
+
+
+class VoiceCommandsConfig(BaseModel):
+    """Voice commands configuration."""
+    
+    enabled: bool = True
+    wake_words: Dict[str, str] = Field(default_factory=dict)  # node_id -> wake_word
+    command_timeout: float = 5.0  # seconds to wait for command after wake word
+    aliases: List[CommandAlias] = Field(default_factory=list)
+    api_port: int = 8001
+
+
 class CommandDefinition(BaseModel):
     """Command definition."""
     
@@ -175,6 +194,7 @@ class Config(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     audio: AudioConfig = Field(default_factory=AudioConfig)
     wakeword: WakewordConfig = Field(default_factory=WakewordConfig)
+    voice_commands: VoiceCommandsConfig = Field(default_factory=VoiceCommandsConfig)
     commands: CommandsConfig = Field(default_factory=CommandsConfig)
     database: DatabaseConfig
     network: NetworkConfig = Field(default_factory=NetworkConfig)
@@ -239,3 +259,22 @@ class EnvSettings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         extra = "ignore"  # Allow extra fields in .env
+
+
+def load_config(config_path: Optional[Path] = None) -> Config:
+    """
+    Load configuration from YAML file and environment variables.
+    
+    Args:
+        config_path: Path to config file (default: ./config.yaml)
+    
+    Returns:
+        Config object
+    """
+    if config_path is None:
+        config_path = Path("config.yaml")
+    
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+    
+    return Config.from_yaml(config_path)

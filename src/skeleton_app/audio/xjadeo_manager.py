@@ -2,6 +2,19 @@
 xjadeo video player manager.
 
 Manages xjadeo processes for JACK transport-synced video playback.
+
+When sync_to_jack=True (default), xjadeo automatically follows JACK transport.
+This means when you use TransportAgent/TransportCoordinator to control JACK
+transport across multiple machines, all xjadeo instances will stay in sync.
+
+Example workflow for distributed recording:
+    1. Each musician launches xjadeo with the same video file
+    2. Each musician's TransportAgent is running
+    3. Director's TransportCoordinator sends locate_and_start command
+    4. All JACK transports start in sync
+    5. All xjadeo instances show the same frame simultaneously
+    
+See TRANSPORT_COORDINATION.md for details.
 """
 
 import logging

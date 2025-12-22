@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 class ServiceType(str, Enum):
     """Types of services that can be registered."""
     JACK_AUDIO = "jack_audio"
+    JACK_TRANSPORT_AGENT = "jack_transport_agent"
+    JACK_TRANSPORT_COORDINATOR = "jack_transport_coordinator"
     XJADEO_VIDEO = "xjadeo_video"
     LLM_INFERENCE = "llm_inference"
     STT_ENGINE = "stt_engine"

@@ -1,0 +1,19 @@
+[Unit]
+Description=Skeleton App Voice Command Service
+After=network.target jack.service
+Wants=jack.service
+
+[Service]
+Type=simple
+User=sysadmin
+WorkingDirectory=/home/sysadmin/Programs/skeleton-app
+Environment="PATH=/home/sysadmin/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/usr/bin/python3 -m skeleton_app.cli voice --host 0.0.0.0 --port 8001
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

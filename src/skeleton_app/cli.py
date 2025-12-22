@@ -255,6 +255,63 @@ def info(ctx):
         console.print(f"  Roles: {', '.join(config.node.roles)}")
 
 
+@cli.command()
+@click.option("--host", default="0.0.0.0", help="Host to bind to")
+@click.option("--port", default=8001, type=int, help="Port to bind to")
+@click.pass_context
+def voice(ctx, host: str, port: int):
+    """Start voice command service."""
+    config = ctx.obj.get("config")
+    
+    if not config:
+        console.print("[red]Error: Configuration file required[/red]")
+        return
+    
+    if not config.voice_commands.enabled:
+        console.print("[yellow]Warning: Voice commands disabled in config[/yellow]")
+    
+    console.print(Panel.fit(
+        f"[bold cyan]Starting Voice Command Service[/bold cyan]\n"
+        f"Host: {host}:{port}\n"
+        f"Node: {config.node.name} ({config.node.id})",
+        border_style="green"
+    ))
+    
+    asyncio.run(run_voice_service(config, host, port))
+
+
+async def run_voice_service(config: Config, host: str, port: int):
+    """Run the voice command service."""
+    from skeleton_app.providers.voice_command_service import VoiceCommandService
+    
+    try:
+        service = VoiceCommandService(config)
+        
+        console.print("[green]Voice command service starting...[/green]")
+        console.print(f"Wake words: {config.voice_commands.wake_words}")
+        
+        # Start service
+        await service.start()
+        
+        console.print(f"[green]✓[/green] Service running on http://{host}:{port}")
+        console.print("[cyan]WebSocket endpoint:[/cyan] ws://{host}:{port}/ws")
+        console.print("\nPress Ctrl+C to stop")
+        
+        # Keep running
+        while True:
+            await asyncio.sleep(1)
+    
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Shutting down...[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise
+    finally:
+        if 'service' in locals():
+            await service.stop()
+        console.print("[green]Service stopped[/green]")
+
+
 def main():
     """Entry point for CLI."""
     cli(obj={})

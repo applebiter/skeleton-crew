@@ -75,10 +75,12 @@ logs/
 !assets/**/*.wav
 !assets/**/*.mp3
 
-# Model files (can be large)
-models/*.bin
-models/*.gguf
-models/*.pt
+# Model files (can be large) - exclude everything except README files
+models/*
+!models/README.md
+!models/vosk/
+models/vosk/*
+!models/vosk/README.md
 
 # Temporary files
 tmp/

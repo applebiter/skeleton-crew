@@ -48,7 +48,42 @@ tts:
   piper:
     model: "en_US-lessac-medium"
     model_path: "./models/piper"
-    sample_rate: 22050
+
+# Voice Commands Configuration
+voice_commands:
+  enabled: true
+  api_port: 8001
+  command_timeout: 5.0
+  
+  # Wake words for each node
+  wake_words:
+    indigo: "computer indigo"
+    green: "computer green"
+    karate: "computer karate"
+  
+  # Command aliases for better recognition
+  aliases:
+    - alias: "play"
+      actual_command: "transport_start"
+      description: "Start JACK transport"
+    
+    - alias: "stop"
+      actual_command: "transport_stop"
+      description: "Stop JACK transport"
+    
+    - alias: "record"
+      actual_command: "recording_start"
+      description: "Start recording"
+    
+    - alias: "save"
+      actual_command: "save_project"
+      description: "Save current project"
+    
+    - alias: "connect audio"
+      actual_command: "jack_connect_audio"
+      description: "Connect JACK audio ports"
+  
+  sample_rate: 22050
     
 # LLM Configuration
 llm:

@@ -22,8 +22,10 @@ from skeleton_app.gui.widgets.patchbay_widget import PatchbayWidget
 from skeleton_app.gui.widgets.node_canvas_v3 import NodeCanvasWidget
 from skeleton_app.gui.widgets.video_panel import VideoPanel
 from skeleton_app.gui.widgets.transcode_panel import TranscodePanel
+from skeleton_app.gui.widgets.transport_nodes import TransportAgentNodeWidget, TransportCoordinatorNodeWidget
 from skeleton_app.audio.jack_client import JackClientManager
 from skeleton_app.audio.qt_video_player import QtVideoPlayerManager
+from skeleton_app.audio.transport_services import TransportAgentService, TransportCoordinatorService
 
 
 class MainWindow(QMainWindow):
@@ -54,6 +56,10 @@ class MainWindow(QMainWindow):
         # Database and service discovery
         self.database: Optional[Database] = None
         self.service_discovery: Optional[ServiceDiscovery] = None
+        
+        # Transport coordination services
+        self.transport_agent: Optional[TransportAgentService] = None
+        self.transport_coordinator: Optional[TransportCoordinatorService] = None
         
         # Setup UI
         self.setWindowTitle("Skeleton Crew - JACK Control Hub")
@@ -117,6 +123,10 @@ class MainWindow(QMainWindow):
         self.view_transcode_action.setCheckable(True)
         self.view_transcode_action.setChecked(False)
         
+        self.view_transport_action = QAction("Transport &Coordination", self)
+        self.view_transport_action.setCheckable(True)
+        self.view_transport_action.setChecked(True)
+        
         # Help menu actions
         self.about_action = QAction("&About", self)
         self.about_action.triggered.connect(self._show_about)
@@ -142,6 +152,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.view_cluster_action)
         view_menu.addAction(self.view_video_action)
         view_menu.addAction(self.view_transcode_action)
+        view_menu.addAction(self.view_transport_action)
         
         # Help menu
         help_menu = menubar.addMenu("&Help")
@@ -171,7 +182,7 @@ class MainWindow(QMainWindow):
         self.tabs.tabCloseRequested.connect(self._on_tab_close_requested)
         
         # Node Canvas tab (visual graph)
-        self.node_canvas = NodeCanvasWidget(self)
+        self.node_canvas = NodeCanvasWidget(parent=self)
         self.tabs.addTab(self.node_canvas, "Node Canvas")
         
         # Patchbay tab (list view)
@@ -210,6 +221,11 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, self.transcode_dock)
         self.transcode_dock.setVisible(False)
         
+        # Transport coordination dock
+        self.transport_dock = QDockWidget("Transport Coordination", self)
+        self._init_transport_panel()
+        self.addDockWidget(Qt.RightDockWidgetArea, self.transport_dock)
+        
         # Connect view actions
         self.view_cluster_action.toggled.connect(self.cluster_dock.setVisible)
         self.cluster_dock.visibilityChanged.connect(self.view_cluster_action.setChecked)
@@ -217,6 +233,8 @@ class MainWindow(QMainWindow):
         self.video_dock.visibilityChanged.connect(self.view_video_action.setChecked)
         self.view_transcode_action.toggled.connect(self.transcode_dock.setVisible)
         self.transcode_dock.visibilityChanged.connect(self.view_transcode_action.setChecked)
+        self.view_transport_action.toggled.connect(self.transport_dock.setVisible)
+        self.transport_dock.visibilityChanged.connect(self.view_transport_action.setChecked)
     
     def _open_video(self):
         """Handle open video action (delegates to video panel)."""
@@ -251,6 +269,46 @@ class MainWindow(QMainWindow):
         # Transport status
         self.transport_status_label = QLabel("Transport: Stopped")
         self.status_bar.addPermanentWidget(self.transport_status_label)
+    
+    def _init_transport_panel(self):
+        """Initialize transport coordination panel."""
+        # Create container widget with tabs for agent and coordinator
+        transport_container = QWidget()
+        transport_layout = QVBoxLayout(transport_container)
+        transport_layout.setContentsMargins(0, 0, 0, 0)
+        
+        transport_tabs = QTabWidget()
+        
+        # Agent tab
+        try:
+            self.transport_agent = TransportAgentService(
+                node_id=self.config.node.id,
+                jack_client_name=f"transport_{self.config.node.name}",
+                osc_port=5555
+            )
+            agent_widget = TransportAgentNodeWidget(self.transport_agent)
+            transport_tabs.addTab(agent_widget, "Agent (This Node)")
+            
+            # Start agent
+            QTimer.singleShot(500, self.transport_agent.start)
+        except Exception as e:
+            error_label = QLabel(f"Agent unavailable: {e}")
+            transport_tabs.addTab(error_label, "Agent (Error)")
+        
+        # Coordinator tab
+        try:
+            self.transport_coordinator = TransportCoordinatorService(
+                node_id=self.config.node.id,
+                listen_port=5556
+            )
+            coordinator_widget = TransportCoordinatorNodeWidget(self.transport_coordinator)
+            transport_tabs.addTab(coordinator_widget, "Coordinator")
+        except Exception as e:
+            error_label = QLabel(f"Coordinator unavailable: {e}")
+            transport_tabs.addTab(error_label, "Coordinator (Error)")
+        
+        transport_layout.addWidget(transport_tabs)
+        self.transport_dock.setWidget(transport_container)
     
     def _init_jack(self):
         """Initialize JACK connection."""
@@ -408,6 +466,10 @@ class MainWindow(QMainWindow):
         # Stop all video players
         if self.video_manager:
             self.video_manager.cleanup_all()
+        
+        # Stop transport services
+        if self.transport_agent:
+            self.transport_agent.stop()
         
         # Disconnect from JACK
         if self.jack_manager:

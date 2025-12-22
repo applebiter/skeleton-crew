@@ -57,11 +57,13 @@ class GraphModel(QObject):
         super().__init__()
         self.nodes: Dict[str, NodeModel] = {}
         self.connections: List[ConnectionModel] = []
+        self._batch_mode = False  # Suppress signals during batch updates
     
     def add_node(self, name: str, x: float = 0, y: float = 0) -> NodeModel:
         if name not in self.nodes:
             self.nodes[name] = NodeModel(name=name, x=x, y=y)
-            self.changed.emit()
+            if not self._batch_mode:
+                self.changed.emit()
         return self.nodes[name]
     
     def move_node(self, name: str, x: float, y: float):
@@ -74,11 +76,22 @@ class GraphModel(QObject):
         conn = ConnectionModel(output_port, input_port)
         if conn not in self.connections:
             self.connections.append(conn)
-            self.changed.emit()
+            if not self._batch_mode:
+                self.changed.emit()
     
     def clear(self):
         self.nodes.clear()
         self.connections.clear()
+        if not self._batch_mode:
+            self.changed.emit()
+    
+    def begin_batch(self):
+        """Start batch mode - suppress changed signals."""
+        self._batch_mode = True
+    
+    def end_batch(self):
+        """End batch mode - emit one changed signal."""
+        self._batch_mode = False
         self.changed.emit()
 
 
@@ -93,6 +106,9 @@ class NodeGraphicsItem(QGraphicsItem):
         super().__init__()
         self.model = model
         self.graph_model = graph_model
+        self._dragging_connection = False
+        self._drag_start_port = None
+        self._drag_is_output = False
         
         # CRITICAL: Use exact flags from working test
         self.setFlags(
@@ -101,47 +117,99 @@ class NodeGraphicsItem(QGraphicsItem):
             QGraphicsItem.ItemSendsScenePositionChanges
         )
         
+        # Disable caching to prevent artifacts during drag
+        self.setCacheMode(QGraphicsItem.NoCache)
+        
         self.setPos(model.x, model.y)
-        self.width = 150
-        self.height = 100
+        self.socket_radius = 5
+        self._calculate_size()
+    
+    def _calculate_size(self):
+        """Calculate node size based on content."""
+        from PySide6.QtGui import QFontMetrics
+        
+        # Measure text widths
+        font_title = QFont("Sans", 9, QFont.Bold)
+        font_port = QFont("Sans", 8)
+        metrics_title = QFontMetrics(font_title)
+        metrics_port = QFontMetrics(font_port)
+        
+        # Calculate minimum width based on title
+        title_width = metrics_title.horizontalAdvance(self.model.name) + 20  # padding
+        
+        # If node has both inputs and outputs, need space for both side-by-side
+        if self.model.inputs and self.model.outputs:
+            # Find longest input and output names
+            max_input_width = 0
+            for port in self.model.inputs:
+                width = metrics_port.horizontalAdvance(port.name)
+                max_input_width = max(max_input_width, width)
+            
+            max_output_width = 0
+            for port in self.model.outputs:
+                width = metrics_port.horizontalAdvance(port.name)
+                max_output_width = max(max_output_width, width)
+            
+            # Total width = left port text + spacing + right port text + margins
+            port_width = max_input_width + max_output_width + 60  # 60 for sockets, padding, gap
+        else:
+            # Only inputs or only outputs - calculate normally
+            max_port_width = 100
+            for port in self.model.inputs + self.model.outputs:
+                port_width_calc = metrics_port.horizontalAdvance(port.name) + 24
+                max_port_width = max(max_port_width, port_width_calc)
+            port_width = max_port_width
+        
+        # Width is the maximum of title and port requirements
+        self.width = max(150, title_width, port_width)
+    
+    def _calculate_height(self):
+        """Calculate node height based on port count."""
+        max_ports = max(len(self.model.inputs), len(self.model.outputs), 1)
+        return max(100, 30 + max_ports * 18 + 10)
     
     def boundingRect(self):
-        return QRectF(0, 0, self.width, self.height)
+        # Expand bounds generously to include sockets AND any anti-aliasing
+        height = self._calculate_height()
+        margin = 10  # Extra margin to prevent artifacts
+        return QRectF(-margin, -margin, 
+                      self.width + 2 * self.socket_radius + 2 * margin, 
+                      height + 2 * margin)
     
     def paint(self, painter, option, widget):
-        # Background
+        # Get current height from boundingRect
+        height = self._calculate_height()
+        
+        # Background (offset to center within margin)
+        margin = 10
         painter.setBrush(QColor(50, 50, 50))
         painter.setPen(QPen(QColor(200, 200, 200), 2))
-        painter.drawRoundedRect(self.boundingRect(), 5, 5)
+        painter.drawRoundedRect(margin + self.socket_radius, margin, self.width, height, 5, 5)
         
         # Title
         painter.setPen(QColor(255, 255, 255))
         font = QFont("Sans", 9, QFont.Bold)
         painter.setFont(font)
-        painter.drawText(QRectF(5, 5, self.width - 10, 20), Qt.AlignLeft, self.model.name)
+        painter.drawText(QRectF(margin + self.socket_radius + 5, margin + 5, self.width - 10, 20), Qt.AlignLeft, self.model.name)
         
         # Input ports (left side)
-        y = 30
+        y = margin + 30
         painter.setFont(QFont("Sans", 8))
         for port in self.model.inputs:
             painter.setBrush(QColor(100, 100, 255))
-            painter.drawEllipse(QPointF(0, y), 5, 5)
+            painter.drawEllipse(QPointF(margin + self.socket_radius, y), self.socket_radius, self.socket_radius)
             painter.setPen(QColor(200, 200, 200))
-            painter.drawText(QRectF(12, y - 8, self.width - 24, 16), Qt.AlignLeft, port.name)
+            painter.drawText(QRectF(margin + self.socket_radius + 12, y - 8, self.width - 24, 16), Qt.AlignLeft, port.name)
             y += 18
         
         # Output ports (right side)
-        y = 30
+        y = margin + 30
         for port in self.model.outputs:
             painter.setBrush(QColor(100, 255, 100))
-            painter.drawEllipse(QPointF(self.width, y), 5, 5)
+            painter.drawEllipse(QPointF(margin + self.socket_radius + self.width, y), self.socket_radius, self.socket_radius)
             painter.setPen(QColor(200, 200, 200))
-            painter.drawText(QRectF(12, y - 8, self.width - 24, 16), Qt.AlignRight, port.name)
+            painter.drawText(QRectF(margin + self.socket_radius + 12, y - 8, self.width - 24, 16), Qt.AlignRight, port.name)
             y += 18
-        
-        # Adjust height based on ports
-        max_ports = max(len(self.model.inputs), len(self.model.outputs), 1)
-        self.height = max(100, 30 + max_ports * 18 + 10)
     
     def itemChange(self, change, value):
         # Update model when position changes - but DON'T emit changed signal during drag
@@ -150,22 +218,125 @@ class NodeGraphicsItem(QGraphicsItem):
             # Update model silently (no signal emission)
             self.model.x = pos.x()
             self.model.y = pos.y()
-            # Only update connections that are attached to this node
-            for item in self.scene().items():
-                if isinstance(item, ConnectionGraphicsItem):
-                    if self.model.name in item.conn.output_port or self.model.name in item.conn.input_port:
-                        item.update_path()
+            # Update ALL connections - more reliable than searching
+            scene = self.scene()
+            if scene and scene.views():
+                view = scene.views()[0]
+                if hasattr(view, 'connection_items'):
+                    for conn_item in view.connection_items:
+                        # Extract client name from port names for matching
+                        out_client = conn_item.conn.output_port.split(':')[0]
+                        in_client = conn_item.conn.input_port.split(':')[0]
+                        
+                        # Check if this node is involved (handle system split)
+                        node_matches = False
+                        if self.model.name == out_client or self.model.name == in_client:
+                            node_matches = True
+                        elif "system" in self.model.name and (out_client == "system" or in_client == "system"):
+                            # Handle system (capture) and system (playback) nodes
+                            node_matches = True
+                        
+                        if node_matches:
+                            conn_item.update_path()
         return super().itemChange(change, value)
     
     def get_port_scene_pos(self, port_name: str, is_output: bool) -> QPointF:
         """Get scene position of a port."""
         ports = self.model.outputs if is_output else self.model.inputs
+        margin = 10
         for i, port in enumerate(ports):
             if port.name == port_name:
-                y = 30 + i * 18
-                x = self.width if is_output else 0
+                y = margin + 30 + i * 18
+                # Account for margin and socket_radius offset in boundingRect
+                x = (margin + self.socket_radius + self.width) if is_output else (margin + self.socket_radius)
                 return self.mapToScene(QPointF(x, y))
         return self.scenePos()
+    
+    def get_port_at_pos(self, pos: QPointF) -> tuple[Optional[PortModel], bool]:
+        """Check if position is over a port. Returns (port, is_output) or (None, False)."""
+        margin = 10
+        socket_radius = self.socket_radius
+        
+        # Check input ports (left side)
+        y = margin + 30
+        for port in self.model.inputs:
+            port_center = QPointF(margin + socket_radius, y)
+            distance = (pos - port_center).manhattanLength()
+            if distance < socket_radius * 2:  # Click area slightly larger than socket
+                return (port, False)
+            y += 18
+        
+        # Check output ports (right side)
+        y = margin + 30
+        for port in self.model.outputs:
+            port_center = QPointF(margin + socket_radius + self.width, y)
+            distance = (pos - port_center).manhattanLength()
+            if distance < socket_radius * 2:
+                return (port, True)
+            y += 18
+        
+        return (None, False)
+    
+    def mousePressEvent(self, event):
+        """Check if clicking on a port to start connection drag."""
+        if event.button() == Qt.LeftButton:
+            pos = event.pos()
+            port, is_output = self.get_port_at_pos(pos)
+            if port:
+                # Start dragging a connection from this port
+                self._dragging_connection = True
+                self._drag_start_port = port
+                self._drag_is_output = is_output
+                event.accept()
+                # Notify view to start drawing temp connection
+                if self.scene() and self.scene().views():
+                    view = self.scene().views()[0]
+                    if hasattr(view, 'start_connection_drag'):
+                        start_pos = self.get_port_scene_pos(port.name, is_output)
+                        view.start_connection_drag(start_pos, port.full_name, is_output)
+                return
+        
+        # Not clicking on port, allow normal drag
+        super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """Update temp connection line if dragging."""
+        if self._dragging_connection:
+            if self.scene() and self.scene().views():
+                view = self.scene().views()[0]
+                if hasattr(view, 'update_connection_drag'):
+                    view.update_connection_drag(self.mapToScene(event.pos()))
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """Complete connection if released over valid port."""
+        if self._dragging_connection:
+            # Check if released over a port
+            items = self.scene().items(self.mapToScene(event.pos()))
+            target_port = None
+            target_is_output = False
+            
+            for item in items:
+                if isinstance(item, NodeGraphicsItem) and item != self:
+                    port, is_output = item.get_port_at_pos(item.mapFromScene(self.mapToScene(event.pos())))
+                    if port:
+                        target_port = port
+                        target_is_output = is_output
+                        break
+            
+            # Notify view to complete or cancel
+            if self.scene() and self.scene().views():
+                view = self.scene().views()[0]
+                if hasattr(view, 'end_connection_drag'):
+                    view.end_connection_drag(target_port.full_name if target_port else None, target_is_output)
+            
+            self._dragging_connection = False
+            self._drag_start_port = None
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 
 
 class ConnectionGraphicsItem(QGraphicsItem):
@@ -178,14 +349,52 @@ class ConnectionGraphicsItem(QGraphicsItem):
         self.node_items = node_items
         self.setZValue(-1)  # Behind nodes
         self.path = QPainterPath()
+        self.setAcceptHoverEvents(True)  # Enable hover for highlighting
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)  # Make selectable
+        self._hovered = False
         self.update_path()
     
     def boundingRect(self):
-        return self.path.boundingRect()
+        return self.path.boundingRect().adjusted(-5, -5, 5, 5)  # Add padding for click area
     
     def paint(self, painter, option, widget):
-        painter.setPen(QPen(QColor(255, 200, 100), 2))
+        # Highlight on hover or selection
+        if self._hovered or self.isSelected():
+            painter.setPen(QPen(QColor(255, 100, 100), 4))
+        else:
+            painter.setPen(QPen(QColor(255, 200, 100), 2))
         painter.drawPath(self.path)
+    
+    def hoverEnterEvent(self, event):
+        self._hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+    
+    def hoverLeaveEvent(self, event):
+        self._hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
+    
+    def mousePressEvent(self, event):
+        """Right-click to delete connection."""
+        if event.button() == Qt.RightButton:
+            # Get parent widget to access jack_manager
+            if self.scene() and self.scene().views():
+                view = self.scene().views()[0]
+                parent = view.parent()
+                while parent and not hasattr(parent, 'jack_manager'):
+                    parent = parent.parent()
+                
+                if parent and parent.jack_manager:
+                    try:
+                        parent.jack_manager.disconnect_ports(self.conn.output_port, self.conn.input_port)
+                        # Refresh to show removed connection
+                        parent.refresh_from_jack()
+                    except Exception as e:
+                        print(f"Failed to disconnect: {e}")
+            event.accept()
+        else:
+            super().mousePressEvent(event)
     
     def update_path(self):
         # Find start and end positions
@@ -193,6 +402,9 @@ class ConnectionGraphicsItem(QGraphicsItem):
         end_pos = self._get_port_pos(self.conn.input_port, is_output=False)
         
         if start_pos and end_pos:
+            # MUST call prepareGeometryChange BEFORE modifying geometry
+            self.prepareGeometryChange()
+            
             self.path = QPainterPath()
             self.path.moveTo(start_pos)
             
@@ -203,7 +415,9 @@ class ConnectionGraphicsItem(QGraphicsItem):
                 end_pos.x() - dist, end_pos.y(),
                 end_pos.x(), end_pos.y()
             )
-            self.prepareGeometryChange()
+            
+            # Force redraw
+            self.update()
     
     def _get_port_pos(self, full_port_name: str, is_output: bool) -> Optional[QPointF]:
         if ':' not in full_port_name:
@@ -238,8 +452,17 @@ class GraphCanvas(QGraphicsView):
         self.setBackgroundBrush(QBrush(QColor(30, 30, 30)))
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         
+        # Enable panning with middle mouse button
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        
         self.node_items: Dict[str, NodeGraphicsItem] = {}
         self.connection_items: List[ConnectionGraphicsItem] = []
+        
+        # Temporary connection for drag-to-connect
+        self._temp_connection_item = None
+        self._temp_start_pos = None
+        self._temp_start_port = None
+        self._temp_start_is_output = False
         
         # Rebuild view when model changes
         self.model.changed.connect(self.rebuild_view)
@@ -247,6 +470,65 @@ class GraphCanvas(QGraphicsView):
     def wheelEvent(self, event):
         factor = 1.25 if event.angleDelta().y() > 0 else 0.8
         self.scale(factor, factor)
+        self.scale(factor, factor)
+    
+    def start_connection_drag(self, start_pos: QPointF, start_port: str, is_output: bool):
+        """Start dragging a temporary connection line."""
+        from PySide6.QtWidgets import QGraphicsLineItem
+        self._temp_start_pos = start_pos
+        self._temp_start_port = start_port
+        self._temp_start_is_output = is_output
+        
+        # Create temp line
+        self._temp_connection_item = QGraphicsLineItem()
+        self._temp_connection_item.setPen(QPen(QColor(255, 255, 0, 180), 3, Qt.DashLine))
+        self._temp_connection_item.setLine(start_pos.x(), start_pos.y(), start_pos.x(), start_pos.y())
+        self._temp_connection_item.setZValue(-2)
+        self.scene.addItem(self._temp_connection_item)
+    
+    def update_connection_drag(self, current_pos: QPointF):
+        """Update the temporary connection line."""
+        if self._temp_connection_item and self._temp_start_pos:
+            self._temp_connection_item.setLine(
+                self._temp_start_pos.x(), self._temp_start_pos.y(),
+                current_pos.x(), current_pos.y()
+            )
+    
+    def end_connection_drag(self, end_port: Optional[str], end_is_output: bool):
+        """Complete or cancel the connection drag."""
+        # Remove temp line
+        if self._temp_connection_item:
+            self.scene.removeItem(self._temp_connection_item)
+            self._temp_connection_item = None
+        
+        # Create connection if valid
+        if end_port and self._temp_start_port:
+            # Validate: must connect output to input
+            if self._temp_start_is_output and not end_is_output:
+                # Output -> Input (correct)
+                self._create_jack_connection(self._temp_start_port, end_port)
+            elif not self._temp_start_is_output and end_is_output:
+                # Input <- Output (reverse it)
+                self._create_jack_connection(end_port, self._temp_start_port)
+            # else: invalid connection (output to output or input to input)
+        
+        self._temp_start_pos = None
+        self._temp_start_port = None
+    
+    def _create_jack_connection(self, output_port: str, input_port: str):
+        """Create a JACK connection between two ports."""
+        # Get parent widget to access jack_manager
+        parent = self.parent()
+        while parent and not hasattr(parent, 'jack_manager'):
+            parent = parent.parent()
+        
+        if parent and parent.jack_manager:
+            try:
+                parent.jack_manager.connect_ports(output_port, input_port)
+                # Refresh to show new connection
+                parent.refresh_from_jack()
+            except Exception as e:
+                print(f"Failed to create connection: {e}")
     
     def rebuild_view(self):
         """Rebuild all graphics items from model."""
@@ -283,7 +565,7 @@ class GraphCanvas(QGraphicsView):
 class NodeCanvasWidget(QWidget):
     """Controller - bridges JACK manager and GraphModel."""
     
-    def __init__(self, jack_manager: JackClientManager, parent=None):
+    def __init__(self, jack_manager: Optional[JackClientManager] = None, parent=None):
         super().__init__(parent)
         self.jack_manager = jack_manager
         self.presets_dir = Path.home() / ".config" / "skeleton-app" / "jack-presets"
@@ -291,6 +573,9 @@ class NodeCanvasWidget(QWidget):
         
         # Model
         self.model = GraphModel()
+        
+        # Preset positions to apply
+        self._preset_positions = {}
         
         # View
         layout = QVBoxLayout(self)
@@ -320,21 +605,40 @@ class NodeCanvasWidget(QWidget):
         self.canvas = GraphCanvas(self.model)
         layout.addWidget(self.canvas)
         
-        # Auto-refresh
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self.refresh_from_jack)
-        self._timer.start(2000)
+        # Auto-refresh - DISABLED (interferes with dragging)
+        # Use manual Refresh button instead
+        # self._timer = QTimer(self)
+        # self._timer.timeout.connect(self.refresh_from_jack)
+        # self._timer.start(2000)
         
         self.refresh_from_jack()
         self._refresh_preset_list()
     
+    def set_jack_manager(self, jack_manager: Optional[JackClientManager]):
+        """Set or update the JACK manager."""
+        self.jack_manager = jack_manager
+        if jack_manager:
+            self.refresh_from_jack()
+    
     def refresh_from_jack(self):
         """Update model from JACK state."""
+        if not self.jack_manager:
+            return
         try:
             # Get JACK data
             all_ports = self.jack_manager.get_ports(is_audio=True)
             output_ports = set(self.jack_manager.get_ports(is_output=True, is_audio=True))
             connections_dict = self.jack_manager.get_all_connections()
+            
+            # Preserve existing node positions (prefer preset positions if available)
+            old_positions = {name: (node.x, node.y) for name, node in self.model.nodes.items()}
+            # Merge with preset positions (preset takes priority)
+            if self._preset_positions:
+                old_positions.update(self._preset_positions)
+                self._preset_positions = {}  # Clear after use
+            
+            # Batch update - only emit changed once at the end
+            self.model.begin_batch()
             
             # Clear model
             self.model.clear()
@@ -350,7 +654,7 @@ class NodeCanvasWidget(QWidget):
                     clients[client_name] = []
                 clients[client_name].append((port_short, port_name, port_name in output_ports))
             
-            # Create nodes with auto-layout
+            # Create nodes with auto-layout (but restore old positions if available)
             x, y = 50, 50
             for client_name, ports in clients.items():
                 if client_name == "system":
@@ -359,18 +663,23 @@ class NodeCanvasWidget(QWidget):
                     playback_ports = [(s, f) for s, f, _ in ports if "playback" in s]
                     
                     if capture_ports:
-                        node = self.model.add_node("system (capture)", x, y)
+                        node_name = "system (capture)"
+                        saved_x, saved_y = old_positions.get(node_name, (x, y))
+                        node = self.model.add_node(node_name, saved_x, saved_y)
                         for port_short, port_full in capture_ports:
                             node.outputs.append(PortModel(port_short, port_full, True))
                         y += 150
                     
                     if playback_ports:
-                        node = self.model.add_node("system (playback)", x, y)
+                        node_name = "system (playback)"
+                        saved_x, saved_y = old_positions.get(node_name, (x, y))
+                        node = self.model.add_node(node_name, saved_x, saved_y)
                         for port_short, port_full in playback_ports:
                             node.inputs.append(PortModel(port_short, port_full, False))
                         y += 150
                 else:
-                    node = self.model.add_node(client_name, x, y)
+                    saved_x, saved_y = old_positions.get(client_name, (x, y))
+                    node = self.model.add_node(client_name, saved_x, saved_y)
                     for port_short, port_full, is_output in ports:
                         if is_output:
                             node.outputs.append(PortModel(port_short, port_full, True))
@@ -386,6 +695,9 @@ class NodeCanvasWidget(QWidget):
             for out_port, in_ports in connections_dict.items():
                 for in_port in in_ports:
                     self.model.add_connection(out_port, in_port)
+            
+            # End batch - trigger single rebuild
+            self.model.end_batch()
         
         except Exception as e:
             logger.error(f"Error refreshing from JACK: {e}", exc_info=True)
@@ -418,6 +730,9 @@ class NodeCanvasWidget(QWidget):
         with open(path, 'r') as f:
             data = json.load(f)
         
+        # Store positions to be applied during next refresh
+        self._preset_positions = data.get("positions", {})
+        
         # Apply connections
         for out_port, in_ports in data.get("connections", {}).items():
             for in_port in in_ports:
@@ -426,7 +741,10 @@ class NodeCanvasWidget(QWidget):
                 except:
                     pass
         
+        # Refresh will apply positions
         self.refresh_from_jack()
+        
+        QMessageBox.information(self, "Success", f"Preset '{name}' loaded!")
     
     def _refresh_preset_list(self):
         current = self.preset_combo.currentText()
