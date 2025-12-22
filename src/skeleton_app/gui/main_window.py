@@ -21,11 +21,13 @@ from skeleton_app.gui.discovery_bridge import ServiceDiscoveryBridge
 from skeleton_app.gui.widgets.transport_panel import TransportPanel
 from skeleton_app.gui.widgets.cluster_panel import ClusterPanel
 from skeleton_app.gui.widgets.patchbay_widget import PatchbayWidget
+from skeleton_app.gui.widgets.remote_jack_panel import RemoteJackPanel
 from skeleton_app.gui.widgets.node_canvas_v3 import NodeCanvasWidget
 from skeleton_app.gui.widgets.transport_nodes import TransportAgentNodeWidget, TransportCoordinatorNodeWidget
 from skeleton_app.gui.widgets.settings_dialog import SettingsDialog
 from skeleton_app.audio.jack_client import JackClientManager
 from skeleton_app.audio.transport_services import TransportAgentService, TransportCoordinatorService
+from skeleton_app.providers import get_tool_registry, register_builtin_tools
 
 logger = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
@@ -194,10 +196,17 @@ class MainWindow(QMainWindow):
         self.patchbay = PatchbayWidget(self)
         self.tabs.addTab(self.patchbay, "Patchbay List")
         
-        # Prevent closing of system tabs (Node Canvas, Patchbay)
+        # Remote JACK Panel tab (for cluster nodes)
+        self.tool_registry = get_tool_registry()
+        register_builtin_tools(self.tool_registry)
+        self.remote_jack = RemoteJackPanel(parent=self, tool_registry=self.tool_registry)
+        self.tabs.addTab(self.remote_jack, "Remote JACK")
+        
+        # Prevent closing of system tabs (Node Canvas, Patchbay, Remote JACK)
         from PySide6.QtWidgets import QTabBar
         self.tabs.tabBar().setTabButton(0, QTabBar.ButtonPosition.RightSide, None)
         self.tabs.tabBar().setTabButton(1, QTabBar.ButtonPosition.RightSide, None)
+        self.tabs.tabBar().setTabButton(2, QTabBar.ButtonPosition.RightSide, None)
         
         layout.addWidget(self.tabs)
         
@@ -211,6 +220,9 @@ class MainWindow(QMainWindow):
         self.cluster_dock.setWidget(self.cluster_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.cluster_dock)
         
+        # Connect cluster panel node selection to remote JACK panel
+        self.cluster_panel.node_selected.connect(self._on_cluster_node_selected)
+        
         # Transport coordination dock
         self.transport_dock = QDockWidget("Transport Coordination", self)
         self._init_transport_panel()
@@ -222,10 +234,18 @@ class MainWindow(QMainWindow):
         self.view_transport_action.toggled.connect(self.transport_dock.setVisible)
         self.transport_dock.visibilityChanged.connect(self.view_transport_action.setChecked)
     
+    def _on_cluster_node_selected(self, node_id: str, node_name: str):
+        """Handle node selection from cluster panel."""
+        # Update remote JACK panel with available nodes and select this one
+        if hasattr(self, 'cluster_panel') and self.cluster_panel.current_nodes:
+            self.remote_jack.set_available_nodes(self.cluster_panel.current_nodes)
+            # Switch to Remote JACK tab
+            self.tabs.setCurrentWidget(self.remote_jack)
+    
     def _on_tab_close_requested(self, index: int):
         """Handle tab close request."""
-        # Don't allow closing system tabs (first two: Node Canvas, Patchbay)
-        if index < 2:
+        # Don't allow closing system tabs (first three: Node Canvas, Patchbay, Remote JACK)
+        if index < 3:
             return
         
         # For other tabs, just remove

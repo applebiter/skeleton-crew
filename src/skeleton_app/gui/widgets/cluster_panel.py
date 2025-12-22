@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTreeWidget,
     QTreeWidgetItem, QPushButton, QHBoxLayout, QGroupBox
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 
 from skeleton_app.service_discovery import ServiceDiscovery, ServiceInfo, ServiceType
 
@@ -24,11 +24,15 @@ class ClusterPanel(QWidget):
     - Service capabilities
     """
     
+    # Signals
+    node_selected = Signal(str, str)  # (node_id, node_name)
+    
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         
         self.service_discovery: Optional[ServiceDiscovery] = None
         self.discovery_bridge = None
+        self.current_nodes: List[Dict] = []
         
         self._setup_ui()
         
@@ -111,6 +115,21 @@ class ClusterPanel(QWidget):
         
         # Initial update
         self._update_status()
+        
+        # Connect item selection
+        self.service_tree.itemClicked.connect(self._on_tree_item_clicked)
+    
+    def _on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
+        """Handle tree item click - emit node_selected if clicking a node."""
+        # Check if this is a top-level node item (has parent = None)
+        if item.parent() is None:
+            node_id_text = item.text(0)
+            # Extract node_id from text like "Karate (9f4e7b3c...)"
+            if '(' in node_id_text and ')' in node_id_text:
+                node_name = node_id_text.split('(')[0].strip()
+                node_id = item.data(0, Qt.UserRole)  # We'll set this during _update_status
+                if node_id:
+                    self.node_selected.emit(node_id, node_name)
     
     def _update_status(self):
         """Update cluster service status."""
@@ -129,6 +148,7 @@ class ClusterPanel(QWidget):
         # Get all known nodes (including those discovered via UDP)
         try:
             known_nodes = self.service_discovery.get_known_nodes()
+            self.current_nodes = known_nodes
         except Exception as e:
             self.stats_label.setText(f"Error getting nodes: {e}")
             return
@@ -157,6 +177,7 @@ class ClusterPanel(QWidget):
             
             # Create node item
             node_item = QTreeWidgetItem([f"{node_name} ({node_id[:8]}...)", "", "Online"])
+            node_item.setData(0, Qt.UserRole, node_id)  # Store full node_id for selection
             node_item.setExpanded(True)
             node_item.setForeground(0, Qt.white)
             node_item.setForeground(2, Qt.green)
@@ -216,6 +237,7 @@ class ClusterPanel(QWidget):
                     "",
                     "Discovered (no services)"
                 ])
+                node_item.setData(0, Qt.UserRole, node['node_id'])  # Store full node_id
                 node_item.setForeground(0, Qt.gray)
                 node_item.setForeground(2, Qt.yellow)
                 node_item.setToolTip(0, f"Node: {node['node_name']}\nHost: {node['host']}\nPort: {node['port']}")
