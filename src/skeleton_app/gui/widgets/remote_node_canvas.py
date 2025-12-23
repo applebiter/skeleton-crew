@@ -146,8 +146,9 @@ class RemoteNodeCanvas(QWidget):
     
     async def _update_canvas(self):
         """Fetch and update canvas from remote node."""
-        if not self.current_node_id or not self.current_node_host:
+        if not self.current_node_id:
             self.status_label.setText("No node selected")
+            self.status_label.setStyleSheet("color: gray;")
             return
         
         # Check if this is the local node
@@ -156,6 +157,7 @@ class RemoteNodeCanvas(QWidget):
         try:
             if is_local_node:
                 # Query local JACK via tool registry
+                logger.info(f"Querying local JACK for node {self.current_node_id}")
                 result = await self.tool_registry.execute(
                     "jack_status",
                     {},
@@ -163,18 +165,27 @@ class RemoteNodeCanvas(QWidget):
                 )
             else:
                 # Query remote JACK via SSH
+                if not self.current_node_host:
+                    self.status_label.setText(f"No host configured for node {self.current_node_name}")
+                    self.status_label.setStyleSheet("color: red;")
+                    return
+                
+                logger.info(f"Querying remote JACK for node {self.current_node_name} at {self.current_node_host}")
                 result = await self._query_remote_jack()
             
             if result['status'] == 'success':
                 self._populate_canvas(result['output'])
                 self.status_label.setText(f"Connected - {self.current_node_name}")
                 self.status_label.setStyleSheet("color: green;")
+                logger.info(f"Successfully updated canvas for {self.current_node_name}")
             else:
-                self.status_label.setText(f"Error: {result.get('error')}")
+                error_msg = result.get('error', 'Unknown error')
+                self.status_label.setText(f"Error: {error_msg}")
                 self.status_label.setStyleSheet("color: red;")
+                logger.error(f"Failed to query {self.current_node_name}: {error_msg}")
         
         except Exception as e:
-            logger.error(f"Failed to update canvas: {e}")
+            logger.error(f"Failed to update canvas for {self.current_node_name}: {e}", exc_info=True)
             self.status_label.setText(f"Error: {e}")
             self.status_label.setStyleSheet("color: red;")
     
@@ -264,20 +275,24 @@ class RemoteNodeCanvas(QWidget):
         
         # Parse port state
         ports_dict = jack_state.get('ports', {})
-        output_ports = ports_dict.get('output', []) if isinstance(ports_dict, dict) else []
-        input_ports = ports_dict.get('input', []) if isinstance(ports_dict, dict) else []
+        output_ports_list = ports_dict.get('output', []) if isinstance(ports_dict, dict) else []
+        input_ports_list = ports_dict.get('input', []) if isinstance(ports_dict, dict) else []
         connections = jack_state.get('connections', {})
         
-        # Group ports by client
-        clients = {}
-        all_ports = [(p, True) for p in output_ports] + [(p, False) for p in input_ports]
+        # Create set for quick lookup
+        output_ports_set = set(output_ports_list)
         
-        for port_name, is_output in all_ports:
+        # Group ports by client (use ALL ports like local canvas does)
+        clients = {}
+        all_ports = output_ports_list + input_ports_list
+        
+        for port_name in all_ports:
             if ':' not in port_name:
                 continue
             
             client_name = port_name.split(':')[0]
             port_short = ':'.join(port_name.split(':')[1:])
+            is_output = port_name in output_ports_set
             
             if client_name not in clients:
                 clients[client_name] = []
@@ -286,10 +301,11 @@ class RemoteNodeCanvas(QWidget):
         # Create nodes with auto-layout
         x, y = 50, 50
         for client_name, ports in clients.items():
+            # Split special clients like local canvas does
             if client_name == "system":
-                # Split system into capture and playback
-                capture_ports = [(s, f) for s, f, is_out in ports if is_out]
-                playback_ports = [(s, f) for s, f, is_out in ports if not is_out]
+                # Split system by checking port SHORT names
+                capture_ports = [(s, f) for s, f, _ in ports if "capture" in s]
+                playback_ports = [(s, f) for s, f, _ in ports if "playback" in s]
                 
                 if capture_ports:
                     node_name = "system (capture)"
@@ -304,7 +320,28 @@ class RemoteNodeCanvas(QWidget):
                     for port_short, port_full in playback_ports:
                         node.inputs.append(PortModel(port_short, port_full, False))
                     y += 150
+            
+            elif client_name.startswith("a2j"):
+                # Split a2j clients into capture (sources) and playback (sinks)
+                capture_ports = [(s, f) for s, f, is_out in ports if is_out]
+                playback_ports = [(s, f) for s, f, is_out in ports if not is_out]
+                
+                if capture_ports:
+                    node_name = f"{client_name} (capture)"
+                    node = self.model.add_node(node_name, x, y)
+                    for port_short, port_full in capture_ports:
+                        node.outputs.append(PortModel(port_short, port_full, True))
+                    y += 150
+                
+                if playback_ports:
+                    node_name = f"{client_name} (playback)"
+                    node = self.model.add_node(node_name, x, y)
+                    for port_short, port_full in playback_ports:
+                        node.inputs.append(PortModel(port_short, port_full, False))
+                    y += 150
+            
             else:
+                # Regular client - keep all ports together
                 node = self.model.add_node(client_name, x, y)
                 for port_short, port_full, is_output in ports:
                     if is_output:
@@ -317,7 +354,7 @@ class RemoteNodeCanvas(QWidget):
                     x = 50
                     y += 150
         
-        # Add connections
+        # Add connections (like local canvas does)
         for out_port, in_ports in connections.items():
             if isinstance(in_ports, list):
                 for in_port in in_ports:
