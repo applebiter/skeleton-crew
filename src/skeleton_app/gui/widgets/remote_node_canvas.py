@@ -465,7 +465,8 @@ class RemoteNodeCanvas(QWidget):
                 "name": name,
                 "host": self.current_node_host,
                 "connections": {c.output_port: [c.input_port] for c in self.model.connections},
-                "positions": {n.name: (n.x, n.y) for n in self.model.nodes.values()}
+                "positions": {n.name: (n.x, n.y) for n in self.model.nodes.values()},
+                "aliases": self.model.aliases.copy()  # Save client aliases
             }
             
             path = self._get_preset_path(name)
@@ -490,6 +491,9 @@ class RemoteNodeCanvas(QWidget):
         
         # Store positions to be applied during next refresh
         self._preset_positions = data.get("positions", {})
+        
+        # Load aliases
+        self.model.aliases = data.get("aliases", {})
         
         # Apply connections via SSH
         from skeleton_app.remote import SSHExecutor

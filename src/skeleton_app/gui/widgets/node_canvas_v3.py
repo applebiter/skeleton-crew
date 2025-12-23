@@ -57,6 +57,7 @@ class GraphModel(QObject):
         super().__init__()
         self.nodes: Dict[str, NodeModel] = {}
         self.connections: List[ConnectionModel] = []
+        self.aliases: Dict[str, str] = {}  # Map original name -> alias
         self._batch_mode = False  # Suppress signals during batch updates
     
     def add_node(self, name: str, x: float = 0, y: float = 0) -> NodeModel:
@@ -65,6 +66,18 @@ class GraphModel(QObject):
             if not self._batch_mode:
                 self.changed.emit()
         return self.nodes[name]
+    
+    def set_alias(self, original_name: str, alias: str):
+        """Set an alias for a node."""
+        if alias and alias != original_name:
+            self.aliases[original_name] = alias
+        elif original_name in self.aliases:
+            del self.aliases[original_name]
+        self.changed.emit()
+    
+    def get_display_name(self, original_name: str) -> str:
+        """Get display name (alias if set, otherwise original)."""
+        return self.aliases.get(original_name, original_name)
     
     def move_node(self, name: str, x: float, y: float):
         if name in self.nodes:
@@ -82,6 +95,7 @@ class GraphModel(QObject):
     def clear(self):
         self.nodes.clear()
         self.connections.clear()
+        # Don't clear aliases - they persist across refreshes
         if not self._batch_mode:
             self.changed.emit()
     
@@ -186,11 +200,12 @@ class NodeGraphicsItem(QGraphicsItem):
         painter.setPen(QPen(QColor(200, 200, 200), 2))
         painter.drawRoundedRect(margin + self.socket_radius, margin, self.width, height, 5, 5)
         
-        # Title
+        # Title (use display name from graph model - may be aliased)
+        display_name = self.graph_model.get_display_name(self.model.name)
         painter.setPen(QColor(255, 255, 255))
         font = QFont("Sans", 9, QFont.Bold)
         painter.setFont(font)
-        painter.drawText(QRectF(margin + self.socket_radius + 5, margin + 5, self.width - 10, 20), Qt.AlignLeft, self.model.name)
+        painter.drawText(QRectF(margin + self.socket_radius + 5, margin + 5, self.width - 10, 20), Qt.AlignLeft, display_name)
         
         # Input ports (left side)
         y = margin + 30
@@ -295,9 +310,43 @@ class NodeGraphicsItem(QGraphicsItem):
                         start_pos = self.get_port_scene_pos(port.name, is_output)
                         view.start_connection_drag(start_pos, port.full_name, is_output)
                 return
+        elif event.button() == Qt.RightButton:
+            # Show context menu for renaming
+            self._show_context_menu(event.screenPos())
+            event.accept()
+            return
         
         # Not clicking on port, allow normal drag
         super().mousePressEvent(event)
+    
+    def _show_context_menu(self, pos):
+        """Show context menu for node operations."""
+        from PySide6.QtWidgets import QMenu
+        
+        menu = QMenu()
+        
+        current_display = self.graph_model.get_display_name(self.model.name)
+        is_aliased = current_display != self.model.name
+        
+        rename_action = menu.addAction("Rename Client...")
+        if is_aliased:
+            reset_action = menu.addAction(f"Reset to '{self.model.name}'")
+        else:
+            reset_action = None
+        
+        action = menu.exec(pos)
+        
+        if action == rename_action:
+            new_name, ok = QInputDialog.getText(
+                None,
+                "Rename Client",
+                f"Enter new name for '{current_display}':",
+                text=current_display
+            )
+            if ok and new_name and new_name != current_display:
+                self.graph_model.set_alias(self.model.name, new_name)
+        elif reset_action and action == reset_action:
+            self.graph_model.set_alias(self.model.name, "")  # Clear alias
     
     def mouseMoveEvent(self, event):
         """Update temp connection line if dragging."""
@@ -730,7 +779,8 @@ class NodeCanvasWidget(QWidget):
             data = {
                 "name": name,
                 "connections": {c.output_port: [c.input_port] for c in self.model.connections},
-                "positions": {n.name: (n.x, n.y) for n in self.model.nodes.values()}
+                "positions": {n.name: (n.x, n.y) for n in self.model.nodes.values()},
+                "aliases": self.model.aliases.copy()  # Save client aliases
             }
             
             path = self.presets_dir / f"{name}.json"
@@ -754,6 +804,9 @@ class NodeCanvasWidget(QWidget):
         
         # Store positions to be applied during next refresh
         self._preset_positions = data.get("positions", {})
+        
+        # Load aliases
+        self.model.aliases = data.get("aliases", {})
         
         # Apply connections
         for out_port, in_ports in data.get("connections", {}).items():
