@@ -284,7 +284,8 @@ class RemoteNodeCanvas(QWidget):
         
         # Group ports by client (use ALL ports like local canvas does)
         clients = {}
-        all_ports = output_ports_list + input_ports_list
+        # Use set to avoid duplicates
+        all_ports = set(output_ports_list + input_ports_list)
         
         for port_name in all_ports:
             if ':' not in port_name:
