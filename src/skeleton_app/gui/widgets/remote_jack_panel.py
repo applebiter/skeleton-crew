@@ -376,15 +376,18 @@ class RemoteJackPanel(QWidget):
         
         # Add output ports (sources/capture)
         for port_name in output_ports:
-            # Show connection summary in second column
-            conn_summary = ""
-            if port_name in self.connections:
-                conn_count = len(self.connections[port_name])
-                if conn_count > 0:
-                    conn_summary = f"→ {', '.join(sorted(self.connections[port_name]))}"
-            
-            port_item = QTreeWidgetItem([port_name, conn_summary])
+            port_item = QTreeWidgetItem([port_name, ""])
             port_item.setData(0, Qt.UserRole, port_name)
+            
+            # Show connections for this port as child items
+            if port_name in self.connections:
+                for connected_port in sorted(self.connections[port_name]):
+                    conn_item = QTreeWidgetItem(["", connected_port])
+                    port_item.addChild(conn_item)
+                
+                # Expand if there are connections
+                if self.connections[port_name]:
+                    port_item.setExpanded(True)
             
             self.output_tree.addTopLevelItem(port_item)
         
