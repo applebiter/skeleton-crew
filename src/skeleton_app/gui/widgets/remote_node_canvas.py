@@ -236,24 +236,30 @@ class RemoteNodeCanvas(QWidget):
                     # This is a port name
                     current_port = line_stripped
                     
-                    # Classify as output or input
-                    if '_in' in current_port.lower() or ':in' in current_port.lower():
-                        input_ports.add(current_port)
-                    elif '_out' in current_port.lower() or ':out' in current_port.lower():
-                        output_ports.add(current_port)
-                    elif 'capture' in current_port.lower():
+                    # Classify as output or input (use if-elif to prevent duplication)
+                    if 'capture' in current_port.lower():
                         output_ports.add(current_port)
                     elif 'playback' in current_port.lower():
                         input_ports.add(current_port)
-                    else:
+                    elif '_out' in current_port.lower() or ':out' in current_port.lower():
+                        output_ports.add(current_port)
+                    elif '_in' in current_port.lower() or ':in' in current_port.lower():
                         input_ports.add(current_port)
+                    else:
+                        # Default to input for unknown ports
+                        input_ports.add(current_port)
+            
+            # Natural sort function for port names (e.g., capture_1, capture_2, ...)
+            import re
+            def natural_sort_key(text):
+                return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', text)]
             
             return {
                 "status": "success",
                 "output": {
                     "ports": {
-                        "output": sorted(list(output_ports)),
-                        "input": sorted(list(input_ports)),
+                        "output": sorted(list(output_ports), key=natural_sort_key),
+                        "input": sorted(list(input_ports), key=natural_sort_key),
                         "total": len(output_ports) + len(input_ports)
                     },
                     "connections": connections
@@ -311,14 +317,24 @@ class RemoteNodeCanvas(QWidget):
                 if capture_ports:
                     node_name = "system (capture)"
                     node = self.model.add_node(node_name, x, y)
-                    for port_short, port_full in capture_ports:
+                    # Sort ports naturally before adding
+                    import re
+                    def natural_sort_key(item):
+                        text = item[0]  # Sort by port_short
+                        return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', text)]
+                    for port_short, port_full in sorted(capture_ports, key=natural_sort_key):
                         node.outputs.append(PortModel(port_short, port_full, True))
                     y += 150
                 
                 if playback_ports:
                     node_name = "system (playback)"
                     node = self.model.add_node(node_name, x, y)
-                    for port_short, port_full in playback_ports:
+                    # Sort ports naturally before adding
+                    import re
+                    def natural_sort_key(item):
+                        text = item[0]  # Sort by port_short
+                        return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', text)]
+                    for port_short, port_full in sorted(playback_ports, key=natural_sort_key):
                         node.inputs.append(PortModel(port_short, port_full, False))
                     y += 150
             
@@ -330,21 +346,36 @@ class RemoteNodeCanvas(QWidget):
                 if capture_ports:
                     node_name = f"{client_name} (capture)"
                     node = self.model.add_node(node_name, x, y)
-                    for port_short, port_full in capture_ports:
+                    # Sort ports naturally before adding
+                    import re
+                    def natural_sort_key(item):
+                        text = item[0]  # Sort by port_short
+                        return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', text)]
+                    for port_short, port_full in sorted(capture_ports, key=natural_sort_key):
                         node.outputs.append(PortModel(port_short, port_full, True))
                     y += 150
                 
                 if playback_ports:
                     node_name = f"{client_name} (playback)"
                     node = self.model.add_node(node_name, x, y)
-                    for port_short, port_full in playback_ports:
+                    # Sort ports naturally before adding
+                    import re
+                    def natural_sort_key(item):
+                        text = item[0]  # Sort by port_short
+                        return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', text)]
+                    for port_short, port_full in sorted(playback_ports, key=natural_sort_key):
                         node.inputs.append(PortModel(port_short, port_full, False))
                     y += 150
             
             else:
                 # Regular client - keep all ports together
                 node = self.model.add_node(client_name, x, y)
-                for port_short, port_full, is_output in ports:
+                # Sort ports naturally before adding
+                import re
+                def natural_sort_key(item):
+                    text = item[0]  # Sort by port_short
+                    return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', text)]
+                for port_short, port_full, is_output in sorted(ports, key=natural_sort_key):
                     if is_output:
                         node.outputs.append(PortModel(port_short, port_full, True))
                     else:
