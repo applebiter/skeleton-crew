@@ -48,6 +48,7 @@ class RemoteNodeCanvas(QWidget):
         
         # Preset positions to apply
         self._preset_positions = {}
+        self.current_preset_name = None  # Track currently loaded preset
         
         self._setup_ui()
     
@@ -153,6 +154,9 @@ class RemoteNodeCanvas(QWidget):
         
         # Fetch this node's JACK state
         self._sync_update_canvas()
+        
+        # Auto-load last preset for this host
+        self._load_last_preset()
     
     def _on_refresh_clicked(self):
         """Refresh button clicked."""
@@ -459,7 +463,9 @@ class RemoteNodeCanvas(QWidget):
             QMessageBox.warning(self, "No Host", "No remote host selected")
             return
         
-        name, ok = QInputDialog.getText(self, "Save Preset", "Preset name:")
+        # Prepopulate with current preset name if available
+        default_name = self.current_preset_name or ""
+        name, ok = QInputDialog.getText(self, "Save Preset", "Preset name:", text=default_name)
         if ok and name:
             data = {
                 "name": name,
@@ -473,7 +479,15 @@ class RemoteNodeCanvas(QWidget):
             with open(path, 'w') as f:
                 json.dump(data, f, indent=2)
             
+            # Mark as current and last used preset for this host
+            self.current_preset_name = name
+            self._save_last_preset(name)
+            
             self._refresh_preset_list()
+            # Update combo box to show current preset
+            idx = self.preset_combo.findText(name)
+            if idx >= 0:
+                self.preset_combo.setCurrentIndex(idx)
             QMessageBox.information(self, "Success", f"Preset '{name}' saved!")
     
     async def _load_preset_async(self):
@@ -511,6 +525,10 @@ class RemoteNodeCanvas(QWidget):
         
         # Refresh to show updated state with positions
         await self._update_canvas()
+        
+        # Mark as current and last used preset
+        self.current_preset_name = name
+        self._save_last_preset(name)
         
         QMessageBox.information(self, "Success", f"Preset '{name}' loaded!")
     
@@ -550,6 +568,96 @@ class RemoteNodeCanvas(QWidget):
         idx = self.preset_combo.findText(current)
         if idx >= 0:
             self.preset_combo.setCurrentIndex(idx)
+    
+    def _get_last_preset_file(self) -> Path:
+        """Get path to last preset file for current host."""
+        if not self.current_node_host:
+            return self.presets_dir / ".last_preset"
+        host_safe = self.current_node_host.replace(':', '_').replace('/', '_')
+        return self.presets_dir / f".last_preset_{host_safe}"
+    
+    def _save_last_preset(self, name: str):
+        """Save preset name as last used for current host."""
+        try:
+            with open(self._get_last_preset_file(), 'w') as f:
+                f.write(name)
+        except Exception as e:
+            logger.debug(f"Could not save last preset: {e}")
+    
+    def _load_last_preset(self):
+        """Automatically load the last used preset for current host."""
+        last_preset_file = self._get_last_preset_file()
+        if not last_preset_file.exists():
+            return
+        
+        try:
+            with open(last_preset_file, 'r') as f:
+                last_preset_name = f.read().strip()
+            
+            if not last_preset_name:
+                return
+            
+            # Check if preset still exists
+            preset_path = self._get_preset_path(last_preset_name)
+            if not preset_path.exists():
+                return
+            
+            # Select it in combo box
+            idx = self.preset_combo.findText(last_preset_name)
+            if idx >= 0:
+                self.preset_combo.setCurrentIndex(idx)
+                # Load it silently (no message box)
+                self._load_preset_silent(last_preset_name)
+        except Exception as e:
+            logger.debug(f"Could not load last preset: {e}")
+    
+    def _load_preset_silent(self, name: str):
+        """Load preset without showing message box."""
+        import asyncio
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self._load_preset_async_silent(name))
+            loop.close()
+        except Exception as e:
+            logger.error(f"Error loading preset: {e}")
+    
+    async def _load_preset_async_silent(self, name: str):
+        """Load preset asynchronously without message box."""
+        path = self._get_preset_path(name)
+        if not path.exists():
+            return
+        
+        with open(path, 'r') as f:
+            data = json.load(f)
+        
+        # Store positions to be applied during next refresh
+        self._preset_positions = data.get("positions", {})
+        
+        # Load aliases
+        self.model.aliases = data.get("aliases", {})
+        
+        # Apply connections via SSH
+        from skeleton_app.remote import SSHExecutor
+        executor = SSHExecutor()
+        
+        for out_port, in_ports in data.get("connections", {}).items():
+            for in_port in in_ports:
+                try:
+                    await executor.execute(
+                        self.current_node_host,
+                        f"jack_connect '{out_port}' '{in_port}'"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to connect {out_port} -> {in_port}: {e}")
+        
+        # Mark as current preset
+        self.current_preset_name = name
+        
+        # Refresh to show updated state with positions
+        await self._update_canvas()
+        
+        logger.info(f"Auto-loaded preset '{name}' for host {self.current_node_host}")
     
     async def remote_connect_ports(self, output_port: str, input_port: str):
         """Create a connection on the remote host."""

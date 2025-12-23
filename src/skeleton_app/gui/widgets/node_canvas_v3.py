@@ -619,12 +619,14 @@ class NodeCanvasWidget(QWidget):
         self.jack_manager = jack_manager
         self.presets_dir = Path.home() / ".config" / "skeleton-app" / "jack-presets"
         self.presets_dir.mkdir(parents=True, exist_ok=True)
+        self.last_preset_file = self.presets_dir / ".last_preset"
         
         # Model
         self.model = GraphModel()
         
         # Preset positions to apply
         self._preset_positions = {}
+        self.current_preset_name = None  # Track currently loaded preset
         
         # View
         layout = QVBoxLayout(self)
@@ -661,6 +663,9 @@ class NodeCanvasWidget(QWidget):
         # self._timer.start(2000)
         
         self.refresh_from_jack()
+        
+        # Auto-load last used preset
+        self._load_last_preset()
         self._refresh_preset_list()
     
     def set_jack_manager(self, jack_manager: Optional[JackClientManager]):
@@ -774,7 +779,9 @@ class NodeCanvasWidget(QWidget):
             logger.error(f"Error refreshing from JACK: {e}", exc_info=True)
     
     def _save_preset(self):
-        name, ok = QInputDialog.getText(self, "Save Preset", "Preset name:")
+        # Prepopulate with current preset name if available
+        default_name = self.current_preset_name or ""
+        name, ok = QInputDialog.getText(self, "Save Preset", "Preset name:", text=default_name)
         if ok and name:
             data = {
                 "name": name,
@@ -787,7 +794,16 @@ class NodeCanvasWidget(QWidget):
             with open(path, 'w') as f:
                 json.dump(data, f, indent=2)
             
+            # Mark as current and last used preset
+            self.current_preset_name = name
+            with open(self.last_preset_file, 'w') as f:
+                f.write(name)
+            
             self._refresh_preset_list()
+            # Update combo box to show current preset
+            idx = self.preset_combo.findText(name)
+            if idx >= 0:
+                self.preset_combo.setCurrentIndex(idx)
             QMessageBox.information(self, "Success", f"Preset '{name}' saved!")
     
     def _load_preset(self):
@@ -816,6 +832,11 @@ class NodeCanvasWidget(QWidget):
                 except:
                     pass
         
+        # Mark as current and last used preset
+        self.current_preset_name = name
+        with open(self.last_preset_file, 'w') as f:
+            f.write(name)
+        
         # Refresh will apply positions
         self.refresh_from_jack()
         
@@ -832,3 +853,63 @@ class NodeCanvasWidget(QWidget):
         idx = self.preset_combo.findText(current)
         if idx >= 0:
             self.preset_combo.setCurrentIndex(idx)
+    
+    def _load_last_preset(self):
+        """Automatically load the last used preset."""
+        if not self.last_preset_file.exists():
+            return
+        
+        try:
+            with open(self.last_preset_file, 'r') as f:
+                last_preset_name = f.read().strip()
+            
+            if not last_preset_name:
+                return
+            
+            # Check if preset still exists
+            preset_path = self.presets_dir / f"{last_preset_name}.json"
+            if not preset_path.exists():
+                return
+            
+            # Select it in combo box
+            idx = self.preset_combo.findText(last_preset_name)
+            if idx >= 0:
+                self.preset_combo.setCurrentIndex(idx)
+                # Load it silently (no message box)
+                self._load_preset_silent(last_preset_name)
+        except Exception as e:
+            logger.debug(f"Could not load last preset: {e}")
+    
+    def _load_preset_silent(self, name: str):
+        """Load preset without showing message box."""
+        path = self.presets_dir / f"{name}.json"
+        if not path.exists():
+            return
+        
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+            
+            # Store positions to be applied during next refresh
+            self._preset_positions = data.get("positions", {})
+            
+            # Load aliases
+            self.model.aliases = data.get("aliases", {})
+            
+            # Apply connections
+            for out_port, in_ports in data.get("connections", {}).items():
+                for in_port in in_ports:
+                    try:
+                        self.jack_manager.connect_ports(out_port, in_port)
+                    except:
+                        pass
+            
+            # Mark as current preset
+            self.current_preset_name = name
+            
+            # Refresh will apply positions
+            self.refresh_from_jack()
+            
+            logger.info(f"Auto-loaded preset '{name}'")
+        except Exception as e:
+            logger.error(f"Error loading preset: {e}")
