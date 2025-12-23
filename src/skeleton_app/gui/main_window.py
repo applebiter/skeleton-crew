@@ -489,19 +489,23 @@ class MainWindow(QMainWindow):
         if self.service_discovery:
             import asyncio
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
                 loop.run_until_complete(self.service_discovery.stop())
-            except Exception:
-                pass
+                loop.close()
+            except Exception as e:
+                logger.debug(f"Error stopping service discovery: {e}")
         
         # Disconnect database
         if self.database:
             import asyncio
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
                 loop.run_until_complete(self.database.disconnect())
-            except Exception:
-                pass
+                loop.close()
+            except Exception as e:
+                logger.debug(f"Error disconnecting database: {e}")
         
         # Stop transport services
         if self.transport_agent:
