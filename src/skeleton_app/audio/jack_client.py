@@ -173,7 +173,7 @@ class JackClientManager:
     # Port Management
     
     def get_ports(self, name_pattern: str = "", 
-                  is_audio: bool = True,
+                  is_audio: bool = None,
                   is_input: bool = False,
                   is_output: bool = False) -> List[str]:
         """
@@ -181,7 +181,7 @@ class JackClientManager:
         
         Args:
             name_pattern: Port name pattern (regex)
-            is_audio: Filter audio ports
+            is_audio: Filter audio ports (None = all types, True = audio only, False = MIDI only)
             is_input: Filter input ports
             is_output: Filter output ports
         
@@ -191,13 +191,17 @@ class JackClientManager:
         if not self.client:
             return []
         
+        # Build kwargs - only include is_audio if specified
+        kwargs = {
+            'name_pattern': name_pattern,
+            'is_input': is_input,
+            'is_output': is_output
+        }
+        if is_audio is not None:
+            kwargs['is_audio'] = is_audio
+        
         # Use the correct JACK-Client API
-        ports = self.client.get_ports(
-            name_pattern=name_pattern,
-            is_audio=is_audio,
-            is_input=is_input,
-            is_output=is_output
-        )
+        ports = self.client.get_ports(**kwargs)
         
         return [p.name for p in ports]
     
@@ -212,7 +216,8 @@ class JackClientManager:
             return {}
         
         connections = {}
-        output_ports = self.get_ports(is_output=True, is_audio=True)
+        # Get all output ports (audio + MIDI)
+        output_ports = self.get_ports(is_output=True)
         
         for port_name in output_ports:
             try:
