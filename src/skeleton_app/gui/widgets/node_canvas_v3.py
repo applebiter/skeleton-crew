@@ -391,7 +391,7 @@ class ConnectionGraphicsItem(QGraphicsItem):
                         # Refresh to show removed connection
                         parent.refresh_from_jack()
                     except Exception as e:
-                        print(f"Failed to disconnect: {e}")
+                        logger.error(f"Failed to disconnect: {e}", exc_info=True)
             event.accept()
         else:
             super().mousePressEvent(event)
@@ -528,7 +528,7 @@ class GraphCanvas(QGraphicsView):
                 # Refresh to show new connection
                 parent.refresh_from_jack()
             except Exception as e:
-                print(f"Failed to create connection: {e}")
+                logger.error(f"Failed to create connection: {e}", exc_info=True)
     
     def rebuild_view(self):
         """Rebuild all graphics items from model."""
@@ -625,9 +625,9 @@ class NodeCanvasWidget(QWidget):
         if not self.jack_manager:
             return
         try:
-            # Get JACK data
-            all_ports = self.jack_manager.get_ports(is_audio=True)
-            output_ports = set(self.jack_manager.get_ports(is_output=True, is_audio=True))
+            # Get JACK data - include both audio and MIDI ports
+            all_ports = self.jack_manager.get_ports()  # Get all ports (audio + MIDI)
+            output_ports = set(self.jack_manager.get_ports(is_output=True))  # All outputs
             connections_dict = self.jack_manager.get_all_connections()
             
             # Preserve existing node positions (prefer preset positions if available)
