@@ -283,40 +283,58 @@ class RemoteJackPanel(QWidget):
                 }
             
             # Parse jack_lsp output
-            output_ports = []
-            input_ports = []
+            # Note: capture/out ports are SOURCES (they output audio)
+            #       playback/in ports are SINKS (they input audio)
+            output_ports = set()  # Sources
+            input_ports = set()   # Sinks
             connections = {}
             
             current_port = None
             for line in stdout.strip().split('\n'):
-                line = line.strip()
-                if not line:
+                line_stripped = line.strip()
+                if not line_stripped:
                     continue
                 
                 # Port format: "system:capture_1" (possibly with indentation for connections)
                 if line.startswith(' '):
-                    # This is a connection (indented)
+                    # This is a connection (indented line)
                     if current_port:
-                        connected_port = line.strip()
+                        connected_port = line_stripped
                         if current_port not in connections:
                             connections[current_port] = []
                         connections[current_port].append(connected_port)
                 else:
                     # This is a port name
-                    current_port = line
+                    current_port = line_stripped
                     
-                    # Classify as input or output
-                    if 'capture' in line.lower() or ':out' in line.lower():
-                        output_ports.append(line)
+                    # Classify as output or input
+                    # JACK port naming patterns (node_name:port_name):
+                    # Sources (Output ports):
+                    #   - capture* (e.g., system:capture_1, Generic,0,0-in:capture_1)
+                    #   - node_out* (e.g., pulse_out:front-left, skeleton_tools:monitor_out_L)
+                    # Sinks (Input ports):
+                    #   - playback* (e.g., system:playback_1, Generic,0,0-out:playback_1)
+                    #   - node_in* (e.g., pulse_in:front-left, skeleton_tools:monitor_in_L)
+                    #
+                    # Priority: Check explicit _in/_out before generic capture/playback
+                    if '_in' in current_port.lower() or ':in' in current_port.lower():
+                        input_ports.add(current_port)
+                    elif '_out' in current_port.lower() or ':out' in current_port.lower():
+                        output_ports.add(current_port)
+                    elif 'capture' in current_port.lower():
+                        output_ports.add(current_port)
+                    elif 'playback' in current_port.lower():
+                        input_ports.add(current_port)
                     else:
-                        input_ports.append(line)
+                        # Default: assume sink
+                        input_ports.add(current_port)
             
             return {
                 "status": "success",
                 "output": {
                     "ports": {
-                        "output": output_ports,
-                        "input": input_ports,
+                        "output": sorted(list(output_ports)),
+                        "input": sorted(list(input_ports)),
                         "total": len(output_ports) + len(input_ports)
                     },
                     "connections": connections,

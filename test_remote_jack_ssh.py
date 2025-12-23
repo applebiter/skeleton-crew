@@ -43,41 +43,59 @@ skeleton_tools:monitor_in_L
 skeleton_tools:monitor_in_R"""
     
     # Parse like RemoteJackPanel does
-    output_ports = []
-    input_ports = []
+    # Note: capture/out are SOURCES (output ports)
+    #       playback/in are SINKS (input ports)
+    output_ports = set()  # Sources
+    input_ports = set()   # Sinks
     connections = {}
     
     current_port = None
     for line in sample_output.strip().split('\n'):
-        line = line.strip()
-        if not line:
+        line_stripped = line.strip()
+        if not line_stripped:
             continue
         
         # Port format: "system:capture_1" (possibly with indentation for connections)
         if line.startswith(' '):
             # This is a connection (indented)
             if current_port:
-                connected_port = line.strip()
+                connected_port = line_stripped
                 if current_port not in connections:
                     connections[current_port] = []
                 connections[current_port].append(connected_port)
         else:
             # This is a port name
-            current_port = line
+            current_port = line_stripped
             
-            # Classify as input or output
-            if 'capture' in line.lower() or ':out' in line.lower():
-                output_ports.append(line)
+            # Classify as output or input
+            # JACK port naming patterns (node_name:port_name):
+            # Sources (Output ports):
+            #   - capture* (e.g., system:capture_1, Generic,0,0-in:capture_1)
+            #   - node_out* (e.g., pulse_out:front-left, skeleton_tools:monitor_out_L)
+            # Sinks (Input ports):
+            #   - playback* (e.g., system:playback_1, Generic,0,0-out:playback_1)
+            #   - node_in* (e.g., pulse_in:front-left, skeleton_tools:monitor_in_L)
+            #
+            # Priority: Check explicit _in/_out before generic capture/playback
+            if '_in' in current_port.lower() or ':in' in current_port.lower():
+                input_ports.add(current_port)
+            elif '_out' in current_port.lower() or ':out' in current_port.lower():
+                output_ports.add(current_port)
+            elif 'capture' in current_port.lower():
+                output_ports.add(current_port)
+            elif 'playback' in current_port.lower():
+                input_ports.add(current_port)
             else:
-                input_ports.append(line)
+                # Default: assume sink
+                input_ports.add(current_port)
     
     print("\n[1] Parsing Results:")
-    print(f"  ✅ Output Ports: {len(output_ports)}")
-    for port in output_ports[:3]:
+    print(f"  ✅ Output Ports (Sources): {len(output_ports)}")
+    for port in sorted(list(output_ports))[:3]:
         print(f"     • {port}")
     
-    print(f"  ✅ Input Ports: {len(input_ports)}")
-    for port in input_ports[:3]:
+    print(f"  ✅ Input Ports (Sinks): {len(input_ports)}")
+    for port in sorted(list(input_ports))[:3]:
         print(f"     • {port}")
     
     print(f"  ✅ Connections: {len(connections)}")
@@ -87,24 +105,35 @@ skeleton_tools:monitor_in_R"""
     
     # Verify classification
     print("\n[2] Port Classification Validation:")
+    print(f"  ✅ Sources (capture, :out):")
     capture_count = sum(1 for p in output_ports if 'capture' in p.lower())
     out_count = sum(1 for p in output_ports if ':out' in p.lower())
-    print(f"  ✅ Output ports with 'capture': {capture_count}")
-    print(f"  ✅ Output ports with ':out': {out_count}")
+    print(f"     - Capture ports: {capture_count}")
+    print(f"     - :out ports: {out_count}")
+    print(f"     - Total sources: {len(output_ports)}")
     
+    print(f"  ✅ Sinks (playback, :in):")
     playback_count = sum(1 for p in input_ports if 'playback' in p.lower())
-    print(f"  ✅ Input ports with 'playback': {playback_count}")
+    in_count = sum(1 for p in input_ports if ':in' in p.lower())
+    print(f"     - Playback ports: {playback_count}")
+    print(f"     - :in ports: {in_count}")
+    print(f"     - Total sinks: {len(input_ports)}")
     
-    print("\n[3] Connection Mapping:")
-    if connections:
-        print(f"  ✅ {len(connections)} source ports have connections")
-        for src in connections:
-            print(f"     {src}: {connections[src]}")
+    print(f"\n[3] Port Details:")
+    print(f"  Sources (Output Ports):")
+    for p in sorted(output_ports):
+        print(f"     • {p}")
     
-    print("\n" + "="*70)
-    print("✅ jack_lsp Parsing Test PASSED")
-    print("="*70 + "\n")
+    print(f"  Sinks (Input Ports):")
+    for p in sorted(input_ports):
+        print(f"     • {p}")
     
+    print("\n[3] Deduplication Check:")
+    # Check that ports aren't duplicated (using sets prevents duplicates)
+    all_ports = output_ports | input_ports
+    print(f"  ✅ Total unique ports: {len(all_ports)}")
+    print(f"     (No duplicates - sets ensure uniqueness)")
+
     return True
 
 
