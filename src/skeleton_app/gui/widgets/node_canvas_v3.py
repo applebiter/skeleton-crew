@@ -677,6 +677,28 @@ class NodeCanvasWidget(QWidget):
                         for port_short, port_full in playback_ports:
                             node.inputs.append(PortModel(port_short, port_full, False))
                         y += 150
+                
+                elif client_name.startswith("a2j"):
+                    # Split a2j (MIDI bridge) clients into capture (sources) and playback (sinks)
+                    capture_ports = [(s, f) for s, f, is_out in ports if is_out]
+                    playback_ports = [(s, f) for s, f, is_out in ports if not is_out]
+                    
+                    if capture_ports:
+                        node_name = f"{client_name} (capture)"
+                        saved_x, saved_y = old_positions.get(node_name, (x, y))
+                        node = self.model.add_node(node_name, saved_x, saved_y)
+                        for port_short, port_full in capture_ports:
+                            node.outputs.append(PortModel(port_short, port_full, True))
+                        y += 150
+                    
+                    if playback_ports:
+                        node_name = f"{client_name} (playback)"
+                        saved_x, saved_y = old_positions.get(node_name, (x, y))
+                        node = self.model.add_node(node_name, saved_x, saved_y)
+                        for port_short, port_full in playback_ports:
+                            node.inputs.append(PortModel(port_short, port_full, False))
+                        y += 150
+                
                 else:
                     saved_x, saved_y = old_positions.get(client_name, (x, y))
                     node = self.model.add_node(client_name, saved_x, saved_y)
