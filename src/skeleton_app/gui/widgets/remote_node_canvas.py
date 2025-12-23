@@ -386,13 +386,26 @@ class RemoteNodeCanvas(QWidget):
                     x = 50
                     y += 150
         
-        # Add connections (like local canvas does)
-        for out_port, in_ports in connections.items():
-            if isinstance(in_ports, list):
-                for in_port in in_ports:
-                    self.model.add_connection(out_port, in_port)
-            elif isinstance(in_ports, str):
-                self.model.add_connection(out_port, in_ports)
+        # Add connections - deduplicate to prevent double-drawing
+        # jack_lsp -c shows connections from both output and input perspective
+        # We only need to add each connection once
+        added_connections = set()
+        for out_port, in_ports_list in connections.items():
+            # Check if out_port is actually an output (if not, skip - will be added from output side)
+            if out_port not in output_ports_set:
+                continue
+            
+            if isinstance(in_ports_list, list):
+                for in_port in in_ports_list:
+                    conn_key = (out_port, in_port)
+                    if conn_key not in added_connections:
+                        self.model.add_connection(out_port, in_port)
+                        added_connections.add(conn_key)
+            elif isinstance(in_ports_list, str):
+                conn_key = (out_port, in_ports_list)
+                if conn_key not in added_connections:
+                    self.model.add_connection(out_port, in_ports_list)
+                    added_connections.add(conn_key)
         
         # End batch - trigger rebuild
         self.model.end_batch()
