@@ -21,6 +21,14 @@ from skeleton_app.audio.jack_client import JackClientManager
 
 logger = logging.getLogger(__name__)
 
+# Startup confirmation
+print("=" * 60)
+print("NODE_CANVAS_V3 LOADED - Color scheme enabled:")
+print("  Audio nodes: Blue-gray (50, 60, 80)")
+print("  MIDI nodes: Red-gray (80, 50, 50)")
+print("  Mixed nodes: Purple-gray (70, 60, 80)")
+print("=" * 60)
+
 
 # ============================================================================
 # PURE DATA MODEL (No Qt, No UI)
@@ -32,6 +40,7 @@ class PortModel:
     name: str
     full_name: str
     is_output: bool
+    is_midi: bool = False  # Track if this is a MIDI port
 
 @dataclass
 class NodeModel:
@@ -195,8 +204,33 @@ class NodeGraphicsItem(QGraphicsItem):
         height = self._calculate_height()
         
         # Background (offset to center within margin)
+        # Three-way color scheme based on port types
         margin = 10
-        painter.setBrush(QColor(50, 50, 50))
+        all_ports = self.model.inputs + self.model.outputs
+        
+        # TEMPORARY DEBUG - Print port info
+        if not hasattr(self, '_debug_printed'):
+            if all_ports:
+                print(f"NODE '{self.model.name}': {len(all_ports)} ports")
+                print(f"  Sample port: {all_ports[0].name}, is_midi={all_ports[0].is_midi}")
+            self._debug_printed = True
+        
+        if len(all_ports) > 0:
+            has_audio = any(not p.is_midi for p in all_ports)
+            has_midi = any(p.is_midi for p in all_ports)
+            
+            if has_audio and has_midi:
+                # Mixed node: purple-gray
+                painter.setBrush(QColor(70, 60, 80))
+            elif has_midi:
+                # MIDI-only node: red-gray
+                painter.setBrush(QColor(80, 50, 50))
+            else:
+                # Audio-only node: blue-gray
+                painter.setBrush(QColor(50, 60, 80))
+        else:
+            painter.setBrush(QColor(50, 50, 50))  # Default gray for nodes with no ports
+        
         painter.setPen(QPen(QColor(200, 200, 200), 2))
         painter.drawRoundedRect(margin + self.socket_radius, margin, self.width, height, 5, 5)
         
@@ -211,7 +245,11 @@ class NodeGraphicsItem(QGraphicsItem):
         y = margin + 30
         painter.setFont(QFont("Sans", 8))
         for port in self.model.inputs:
-            painter.setBrush(QColor(100, 100, 255))
+            # Use different color for MIDI ports (purple/magenta)
+            if port.is_midi:
+                painter.setBrush(QColor(200, 100, 255))  # Purple for MIDI inputs
+            else:
+                painter.setBrush(QColor(100, 100, 255))  # Blue for audio inputs
             painter.drawEllipse(QPointF(margin + self.socket_radius, y), self.socket_radius, self.socket_radius)
             painter.setPen(QColor(200, 200, 200))
             painter.drawText(QRectF(margin + self.socket_radius + 12, y - 8, self.width - 24, 16), Qt.AlignLeft, port.name)
@@ -220,7 +258,11 @@ class NodeGraphicsItem(QGraphicsItem):
         # Output ports (right side)
         y = margin + 30
         for port in self.model.outputs:
-            painter.setBrush(QColor(100, 255, 100))
+            # Use different color for MIDI ports (orange/yellow)
+            if port.is_midi:
+                painter.setBrush(QColor(255, 200, 100))  # Orange for MIDI outputs
+            else:
+                painter.setBrush(QColor(100, 255, 100))  # Green for audio outputs
             painter.drawEllipse(QPointF(margin + self.socket_radius + self.width, y), self.socket_radius, self.socket_radius)
             painter.setPen(QColor(200, 200, 200))
             painter.drawText(QRectF(margin + self.socket_radius + 12, y - 8, self.width - 24, 16), Qt.AlignRight, port.name)
@@ -697,8 +739,23 @@ class NodeCanvasWidget(QWidget):
             # Clear model
             self.model.clear()
             
-            # Group ports by client
+            # Group ports by client and detect MIDI ports
             clients = {}
+            
+            # Detect MIDI ports by checking each port's type
+            midi_ports = set()
+            for port_name in all_ports:
+                try:
+                    port_obj = self.jack_manager.client.get_port_by_name(port_name)
+                    if port_obj.is_midi:
+                        midi_ports.add(port_name)
+                except Exception as e:
+                    logger.warning(f"Error checking port type for {port_name}: {e}")
+            
+            print(f"DEBUG: Total ports: {len(all_ports)}, MIDI ports: {len(midi_ports)}")
+            if midi_ports:
+                print(f"DEBUG: Sample MIDI ports: {list(midi_ports)[:3]}")
+            
             for port_name in all_ports:
                 if ':' not in port_name:
                     continue
@@ -706,61 +763,63 @@ class NodeCanvasWidget(QWidget):
                 port_short = ':'.join(port_name.split(':')[1:])
                 if client_name not in clients:
                     clients[client_name] = []
-                clients[client_name].append((port_short, port_name, port_name in output_ports))
+                is_output = port_name in output_ports
+                is_midi = port_name in midi_ports
+                clients[client_name].append((port_short, port_name, is_output, is_midi))
             
             # Create nodes with auto-layout (but restore old positions if available)
             x, y = 50, 50
             for client_name, ports in clients.items():
                 if client_name == "system":
                     # Split system
-                    capture_ports = [(s, f) for s, f, _ in ports if "capture" in s]
-                    playback_ports = [(s, f) for s, f, _ in ports if "playback" in s]
+                    capture_ports = [(s, f, m) for s, f, _, m in ports if "capture" in s]
+                    playback_ports = [(s, f, m) for s, f, _, m in ports if "playback" in s]
                     
                     if capture_ports:
                         node_name = "system (capture)"
                         saved_x, saved_y = old_positions.get(node_name, (x, y))
                         node = self.model.add_node(node_name, saved_x, saved_y)
-                        for port_short, port_full in capture_ports:
-                            node.outputs.append(PortModel(port_short, port_full, True))
+                        for port_short, port_full, is_midi in capture_ports:
+                            node.outputs.append(PortModel(port_short, port_full, True, is_midi))
                         y += 150
                     
                     if playback_ports:
                         node_name = "system (playback)"
                         saved_x, saved_y = old_positions.get(node_name, (x, y))
                         node = self.model.add_node(node_name, saved_x, saved_y)
-                        for port_short, port_full in playback_ports:
-                            node.inputs.append(PortModel(port_short, port_full, False))
+                        for port_short, port_full, is_midi in playback_ports:
+                            node.inputs.append(PortModel(port_short, port_full, False, is_midi))
                         y += 150
                 
                 elif client_name.startswith("a2j"):
                     # Split a2j (MIDI bridge) clients into capture (sources) and playback (sinks)
-                    capture_ports = [(s, f) for s, f, is_out in ports if is_out]
-                    playback_ports = [(s, f) for s, f, is_out in ports if not is_out]
+                    capture_ports = [(s, f, m) for s, f, is_out, m in ports if is_out]
+                    playback_ports = [(s, f, m) for s, f, is_out, m in ports if not is_out]
                     
                     if capture_ports:
                         node_name = f"{client_name} (capture)"
                         saved_x, saved_y = old_positions.get(node_name, (x, y))
                         node = self.model.add_node(node_name, saved_x, saved_y)
-                        for port_short, port_full in capture_ports:
-                            node.outputs.append(PortModel(port_short, port_full, True))
+                        for port_short, port_full, is_midi in capture_ports:
+                            node.outputs.append(PortModel(port_short, port_full, True, is_midi))
                         y += 150
                     
                     if playback_ports:
                         node_name = f"{client_name} (playback)"
                         saved_x, saved_y = old_positions.get(node_name, (x, y))
                         node = self.model.add_node(node_name, saved_x, saved_y)
-                        for port_short, port_full in playback_ports:
-                            node.inputs.append(PortModel(port_short, port_full, False))
+                        for port_short, port_full, is_midi in playback_ports:
+                            node.inputs.append(PortModel(port_short, port_full, False, is_midi))
                         y += 150
                 
                 else:
                     saved_x, saved_y = old_positions.get(client_name, (x, y))
                     node = self.model.add_node(client_name, saved_x, saved_y)
-                    for port_short, port_full, is_output in ports:
+                    for port_short, port_full, is_output, is_midi in ports:
                         if is_output:
-                            node.outputs.append(PortModel(port_short, port_full, True))
+                            node.outputs.append(PortModel(port_short, port_full, True, is_midi))
                         else:
-                            node.inputs.append(PortModel(port_short, port_full, False))
+                            node.inputs.append(PortModel(port_short, port_full, False, is_midi))
                     
                     x += 200
                     if x > 800:

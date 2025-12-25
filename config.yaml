@@ -39,9 +39,11 @@ voice_commands:
   api_port: 8001
   command_timeout: 5.0
   wake_words:
-    indigo: computer indigo
-    green: computer green
-    karate: computer karate
+    indigo: indigo
+    green: computer
+    karate: karate
+    orange: orange
+    violet: violet
   aliases:
   - alias: play
     actual_command: transport_start
@@ -62,7 +64,7 @@ voice_commands:
 llm:
   ollama:
     enabled: true
-    base_url: http://localhost:11434
+    base_url: http://indigo:11434
     models:
     - name: granite4:3b
       capabilities:
@@ -96,7 +98,7 @@ audio:
     min_speech_duration: 0.3
 wakeword:
   enabled: true
-  phrase: computer
+  phrase: indigo
   sensitivity: 0.5
   timeout: 5.0
 commands:
@@ -112,7 +114,7 @@ commands:
     - weather forecast
     handler: builtin.weather
 database:
-  url: ""
+  url: postgresql://sysadmin:nx8J33aY@karate:5432/skeleton_crew
   pool_size: 5
   max_overflow: 10
 network:
@@ -120,7 +122,7 @@ network:
     backend: postgres
     nodes:
     - id: windows-main
-      host: 192.168.1.100
+      host: 192.168.1.9
       port: 8000
       roles:
       - llm_heavy
