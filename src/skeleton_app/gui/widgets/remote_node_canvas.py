@@ -324,6 +324,10 @@ class RemoteNodeCanvas(QWidget):
         # Use set to avoid duplicates
         all_ports = set(output_ports_list + input_ports_list)
         
+        # Detect MIDI ports - a2j ports are MIDI, rest are typically audio
+        # For remote, we infer from port name since we can't query port properties directly
+        midi_ports = {p for p in all_ports if p.startswith('a2j:')}
+        
         for port_name in all_ports:
             if ':' not in port_name:
                 continue
@@ -331,10 +335,11 @@ class RemoteNodeCanvas(QWidget):
             client_name = port_name.split(':')[0]
             port_short = ':'.join(port_name.split(':')[1:])
             is_output = port_name in output_ports_set
+            is_midi = port_name in midi_ports
             
             if client_name not in clients:
                 clients[client_name] = []
-            clients[client_name].append((port_short, port_name, is_output))
+            clients[client_name].append((port_short, port_name, is_output, is_midi))
         
         # Create nodes with auto-layout (but restore preset positions if available)
         x, y = 50, 50
@@ -342,8 +347,8 @@ class RemoteNodeCanvas(QWidget):
             # Split special clients like local canvas does
             if client_name == "system":
                 # Split system by checking port SHORT names
-                capture_ports = [(s, f) for s, f, _ in ports if "capture" in s]
-                playback_ports = [(s, f) for s, f, _ in ports if "playback" in s]
+                capture_ports = [(s, f, m) for s, f, _, m in ports if "capture" in s]
+                playback_ports = [(s, f, m) for s, f, _, m in ports if "playback" in s]
                 
                 if capture_ports:
                     node_name = "system (capture)"
@@ -354,8 +359,8 @@ class RemoteNodeCanvas(QWidget):
                     def natural_sort_key(item):
                         text = item[0]  # Sort by port_short
                         return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', text)]
-                    for port_short, port_full in sorted(capture_ports, key=natural_sort_key):
-                        node.outputs.append(PortModel(port_short, port_full, True))
+                    for port_short, port_full, is_midi in sorted(capture_ports, key=natural_sort_key):
+                        node.outputs.append(PortModel(port_short, port_full, True, is_midi))
                     y += 150
                 
                 if playback_ports:
@@ -367,14 +372,14 @@ class RemoteNodeCanvas(QWidget):
                     def natural_sort_key(item):
                         text = item[0]  # Sort by port_short
                         return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', text)]
-                    for port_short, port_full in sorted(playback_ports, key=natural_sort_key):
-                        node.inputs.append(PortModel(port_short, port_full, False))
+                    for port_short, port_full, is_midi in sorted(playback_ports, key=natural_sort_key):
+                        node.inputs.append(PortModel(port_short, port_full, False, is_midi))
                     y += 150
             
             elif client_name.startswith("a2j"):
                 # Split a2j clients into capture (sources) and playback (sinks)
-                capture_ports = [(s, f) for s, f, is_out in ports if is_out]
-                playback_ports = [(s, f) for s, f, is_out in ports if not is_out]
+                capture_ports = [(s, f, m) for s, f, is_out, m in ports if is_out]
+                playback_ports = [(s, f, m) for s, f, is_out, m in ports if not is_out]
                 
                 if capture_ports:
                     node_name = f"{client_name} (capture)"
@@ -385,8 +390,8 @@ class RemoteNodeCanvas(QWidget):
                     def natural_sort_key(item):
                         text = item[0]  # Sort by port_short
                         return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', text)]
-                    for port_short, port_full in sorted(capture_ports, key=natural_sort_key):
-                        node.outputs.append(PortModel(port_short, port_full, True))
+                    for port_short, port_full, is_midi in sorted(capture_ports, key=natural_sort_key):
+                        node.outputs.append(PortModel(port_short, port_full, True, is_midi))
                     y += 150
                 
                 if playback_ports:
@@ -398,8 +403,8 @@ class RemoteNodeCanvas(QWidget):
                     def natural_sort_key(item):
                         text = item[0]  # Sort by port_short
                         return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', text)]
-                    for port_short, port_full in sorted(playback_ports, key=natural_sort_key):
-                        node.inputs.append(PortModel(port_short, port_full, False))
+                    for port_short, port_full, is_midi in sorted(playback_ports, key=natural_sort_key):
+                        node.inputs.append(PortModel(port_short, port_full, False, is_midi))
                     y += 150
             
             else:
@@ -411,11 +416,11 @@ class RemoteNodeCanvas(QWidget):
                 def natural_sort_key(item):
                     text = item[0]  # Sort by port_short
                     return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', text)]
-                for port_short, port_full, is_output in sorted(ports, key=natural_sort_key):
+                for port_short, port_full, is_output, is_midi in sorted(ports, key=natural_sort_key):
                     if is_output:
-                        node.outputs.append(PortModel(port_short, port_full, True))
+                        node.outputs.append(PortModel(port_short, port_full, True, is_midi))
                     else:
-                        node.inputs.append(PortModel(port_short, port_full, False))
+                        node.inputs.append(PortModel(port_short, port_full, False, is_midi))
                 
                 x += 200
                 if x > 800:
